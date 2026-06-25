@@ -93,8 +93,8 @@ public class Game1 : Game
 
         if (Pressed(keyboard, Keys.R))
         {
-            _levelManager.Restart();
-            _history.Clear();
+            // Restart empilha um snapshot no histórico, então o próprio R pode ser desfeito com Z.
+            _levelManager.Restart(_history);
         }
         else if (Pressed(keyboard, Keys.Z))
         {

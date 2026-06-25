@@ -40,7 +40,7 @@ public class LevelManager
     {
         _currentLevel = level;
 
-        // Remove entidades de um nível anterior (importante pro restart não duplicar).
+        // Remove entidades de um nível anterior (importante pra troca de nível não duplicar).
         DestroyAllEntities();
 
         // Reseta grid
@@ -52,6 +52,7 @@ public class LevelManager
             var entity = _world.World.Create(
                 new GridPosition(x, y, z),
                 new Player { Speed = 1f },
+                new SpawnPosition(x, y, z),
                 new RenderPosition(GridView.ToWorld(_world.Grid, x, z, GridView.PieceY))
             );
             _world.Grid.SetOccupied(x, y, z, true);
@@ -63,6 +64,7 @@ public class LevelManager
             var entity = _world.World.Create(
                 new GridPosition(x, y, z),
                 new Box { Type = type },
+                new SpawnPosition(x, y, z),
                 new RenderPosition(GridView.ToWorld(_world.Grid, x, z, GridView.PieceY))
             );
             _world.Grid.SetOccupied(x, y, z, true);
@@ -84,19 +86,57 @@ public class LevelManager
         {
             var entity = _world.World.Create(
                 new GridPosition(x, y, z),
-                new Enemy { Speed = 0.5f }
+                new Enemy { Speed = 0.5f },
+                new SpawnPosition(x, y, z)
             );
             _world.Grid.SetOccupied(x, y, z, true);
         }
     }
 
     /// <summary>
-    /// Recarrega o nível atual do zero (volta ao estado inicial).
+    /// Volta todas as peças à posição inicial (R). Em vez de destruir/recriar entidades,
+    /// reposiciona as existentes — assim os handles de Entity continuam válidos e o undo (Z)
+    /// consegue reverter o próprio restart. Antes de reposicionar, empilha um snapshot do
+    /// estado atual de TODAS as peças (inclui a caixa permanente/verde e frágeis quebradas),
+    /// que é justamente o conjunto que o restart afeta — diferente de um movimento normal.
     /// </summary>
-    public void Restart()
+    public void Restart(History history)
     {
-        if (_currentLevel != null)
-            LoadLevel(_currentLevel);
+        if (_currentLevel == null)
+            return;
+
+        var snapshot = new List<EntityState>();
+        var query = new QueryDescription().WithAll<GridPosition, SpawnPosition>();
+
+        // 1) Snapshot do estado atual pra permitir o undo do restart. A verde NÃO entra:
+        //    o undo nunca a reverte (só o R a reposiciona); por isso, ao desfazer um R,
+        //    tudo volta ao estado pré-R, mas a verde permanece no spawn.
+        _world.World.Query(in query, (Entity e, ref GridPosition pos) =>
+        {
+            if (_world.World.Has<Box>(e) && _world.World.Get<Box>(e).Type == BoxType.Permanent)
+                return;
+
+            Box? boxState = _world.World.Has<Box>(e) ? _world.World.Get<Box>(e) : null;
+            snapshot.Add(new EntityState(e, pos, boxState));
+        });
+        history.Push(snapshot);
+
+        // 2) Reposiciona cada peça pro spawn e reconstrói o grid do zero.
+        _world.Grid.Clear();
+        _world.World.Query(in query, (Entity e, ref GridPosition pos, ref SpawnPosition spawn) =>
+        {
+            pos = new GridPosition(spawn.X, spawn.Y, spawn.Z);
+
+            // Caixa que tinha quebrado volta inteira.
+            if (_world.World.Has<Box>(e))
+            {
+                var box = _world.World.Get<Box>(e);
+                box.Broken = false;
+                _world.World.Set(e, box);
+            }
+
+            _world.Grid.SetOccupied(spawn.X, spawn.Y, spawn.Z, true);
+        });
     }
 
     private void DestroyAllEntities()

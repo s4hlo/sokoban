@@ -69,3 +69,22 @@ public struct Enemy
 {
     public float Speed;
 }
+
+/// <summary>
+/// Célula inicial (spawn) da peça no grid. Guardada na própria entity pra que o
+/// restart (R) consiga reposicioná-la sem destruir/recriar — mantendo o mesmo
+/// handle de Entity válido, o que permite o undo reverter o próprio restart.
+/// </summary>
+public struct SpawnPosition
+{
+    public int X;
+    public int Y;
+    public int Z;
+
+    public SpawnPosition(int x, int y, int z)
+    {
+        X = x;
+        Y = y;
+        Z = z;
+    }
+}
