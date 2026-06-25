@@ -18,6 +18,8 @@ public class Game1 : Game
     private MoveAnimationSystem _animationSystem;
     private RenderSystem _renderSystem;
     private Camera _camera;
+    private History _history;
+    private KeyboardState _previousKeyboard;
 
     public Game1()
     {
@@ -36,8 +38,9 @@ public class Game1 : Game
     {
         // Grid plano: uma única camada (altura 1) no plano X/Z.
         _gameWorld = new GameWorld(8, 1, 8);
+        _history = new History();
         _levelManager = new LevelManager(_gameWorld);
-        _movementSystem = new MovementSystem(_gameWorld);
+        _movementSystem = new MovementSystem(_gameWorld, _history);
         _animationSystem = new MoveAnimationSystem(_gameWorld);
 
         Log.Information("Game initialized");
@@ -61,6 +64,7 @@ public class Game1 : Game
         // Duas médias em fila abaixo do player (empurra as duas de uma vez).
         testLevel.BoxSpawns.Add((3, 0, 5, BoxType.Medium));
         testLevel.BoxSpawns.Add((3, 0, 6, BoxType.Medium));
+        testLevel.BoxSpawns.Add((3, 0, 4, BoxType.Medium));
         // Leves em fila (carregadas de graça, mesmo várias).
         testLevel.BoxSpawns.Add((5, 0, 5, BoxType.Light));
         testLevel.BoxSpawns.Add((6, 0, 5, BoxType.Light));
@@ -75,14 +79,32 @@ public class Game1 : Game
 
     protected override void Update(GameTime gameTime)
     {
-        if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
+        var keyboard = Keyboard.GetState();
+
+        if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || keyboard.IsKeyDown(Keys.Escape))
             Exit();
 
-        _movementSystem.Update(Keyboard.GetState());
+        if (Pressed(keyboard, Keys.R))
+        {
+            _levelManager.Restart();
+            _history.Clear();
+        }
+        else if (Pressed(keyboard, Keys.Z))
+        {
+            _history.Undo(_gameWorld);
+        }
+
+        _movementSystem.Update(keyboard);
         _animationSystem.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+
+        _previousKeyboard = keyboard;
 
         base.Update(gameTime);
     }
+
+    // Detecção de borda: tecla recém-pressionada neste frame.
+    private bool Pressed(KeyboardState current, Keys key)
+        => current.IsKeyDown(key) && _previousKeyboard.IsKeyUp(key);
 
     protected override void Draw(GameTime gameTime)
     {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Arch.Core;
 using Sokoban3D.Core;
 using Sokoban3D.ECS.Components;
 
@@ -38,6 +39,9 @@ public class LevelManager
     public void LoadLevel(Level level)
     {
         _currentLevel = level;
+
+        // Remove entidades de um nível anterior (importante pro restart não duplicar).
+        DestroyAllEntities();
 
         // Reseta grid
         _world.Grid.Clear();
@@ -84,6 +88,25 @@ public class LevelManager
             );
             _world.Grid.SetOccupied(x, y, z, true);
         }
+    }
+
+    /// <summary>
+    /// Recarrega o nível atual do zero (volta ao estado inicial).
+    /// </summary>
+    public void Restart()
+    {
+        if (_currentLevel != null)
+            LoadLevel(_currentLevel);
+    }
+
+    private void DestroyAllEntities()
+    {
+        var toDestroy = new List<Entity>();
+        var query = new QueryDescription().WithAll<GridPosition>();
+        _world.World.Query(in query, (Entity entity) => toDestroy.Add(entity));
+
+        foreach (var entity in toDestroy)
+            _world.World.Destroy(entity);
     }
 
     public Level CurrentLevel => _currentLevel;

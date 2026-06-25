@@ -17,11 +17,13 @@ public class MovementSystem
     private const int PlayerPushStrength = 2;
 
     private readonly GameWorld _world;
+    private readonly History _history;
     private KeyboardState _previous;
 
-    public MovementSystem(GameWorld world)
+    public MovementSystem(GameWorld world, History history)
     {
         _world = world;
+        _history = history;
     }
 
     public void Update(KeyboardState keyboard)
@@ -47,24 +49,29 @@ public class MovementSystem
         if (!_world.Grid.IsValid(targetX, pos.Y, targetZ))
             return;
 
+        var record = new List<EntityMove>();
+
         if (_world.Grid.IsOccupied(targetX, pos.Y, targetZ))
         {
             // Só dá pra avançar se a fila de caixas à frente puder ser empurrada.
-            if (!TryPushChain(targetX, pos.Y, targetZ, dx, dz))
+            if (!TryPushChain(targetX, pos.Y, targetZ, dx, dz, record))
                 return;
         }
 
         // Move o player (a célula alvo já está livre se houve empurrão).
+        record.Add(new EntityMove(player, pos));
         _world.Grid.SetOccupied(pos.X, pos.Y, pos.Z, false);
         _world.Grid.SetOccupied(targetX, pos.Y, targetZ, true);
         _world.World.Set(player, new GridPosition(targetX, pos.Y, targetZ));
+
+        _history.Push(record);
     }
 
     /// <summary>
     /// Tenta empurrar a fila de caixas que começa em (x,y,z), na direção (dx,dz).
     /// Sucesso se a soma dos pesos ≤ força do player e houver célula livre no fim.
     /// </summary>
-    private bool TryPushChain(int x, int y, int z, int dx, int dz)
+    private bool TryPushChain(int x, int y, int z, int dx, int dz, List<EntityMove> record)
     {
         var chain = new List<Entity>();
         int totalWeight = 0;
@@ -99,6 +106,7 @@ public class MovementSystem
             int nx = p.X + dx;
             int nz = p.Z + dz;
 
+            record.Add(new EntityMove(chain[i], p));
             _world.Grid.SetOccupied(p.X, p.Y, p.Z, false);
             _world.Grid.SetOccupied(nx, p.Y, nz, true);
             _world.World.Set(chain[i], new GridPosition(nx, p.Y, nz));
