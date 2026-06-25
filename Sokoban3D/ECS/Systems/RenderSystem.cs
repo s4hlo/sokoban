@@ -8,7 +8,7 @@ namespace Sokoban3D.ECS.Systems;
 
 /// <summary>
 /// Desenha o grid (chão) e as entidades (player, caixas) como cubos 3D.
-/// Gameplay é no plano X/Z (Y é só altura visual).
+/// As peças são desenhadas na RenderPosition (visual interpolado), não na célula lógica.
 /// </summary>
 public class RenderSystem
 {
@@ -39,8 +39,7 @@ public class RenderSystem
         for (int x = 0; x < grid.Width; x++)
             for (int z = 0; z < grid.Depth; z++)
             {
-                var pos = GridToWorld(x, z, 0f);
-                pos.Y = -0.1f; // afunda o chão um pouco abaixo das peças
+                var pos = GridView.ToWorld(grid, x, z, GridView.FloorY);
                 _cubes.Draw(pos, scale, FloorColor, view, projection);
             }
     }
@@ -49,27 +48,16 @@ public class RenderSystem
     {
         var pieceScale = new Vector3(0.8f);
 
-        var players = new QueryDescription().WithAll<Player, GridPosition>();
-        _world.World.Query(in players, (ref GridPosition p) =>
+        var players = new QueryDescription().WithAll<Player, RenderPosition>();
+        _world.World.Query(in players, (ref RenderPosition r) =>
         {
-            _cubes.Draw(GridToWorld(p.X, p.Z, 0.5f), pieceScale, PlayerColor, view, projection);
+            _cubes.Draw(r.Value, pieceScale, PlayerColor, view, projection);
         });
 
-        var boxes = new QueryDescription().WithAll<Box, GridPosition>();
-        _world.World.Query(in boxes, (ref GridPosition p) =>
+        var boxes = new QueryDescription().WithAll<Box, RenderPosition>();
+        _world.World.Query(in boxes, (ref RenderPosition r) =>
         {
-            _cubes.Draw(GridToWorld(p.X, p.Z, 0.5f), pieceScale, BoxColor, view, projection);
+            _cubes.Draw(r.Value, pieceScale, BoxColor, view, projection);
         });
-    }
-
-    /// <summary>
-    /// Converte uma célula do grid (x, z) em posição no mundo, centrando o grid na origem.
-    /// </summary>
-    private Vector3 GridToWorld(int gx, int gz, float y)
-    {
-        var grid = _world.Grid;
-        float wx = gx - (grid.Width - 1) / 2f;
-        float wz = gz - (grid.Depth - 1) / 2f;
-        return new Vector3(wx, y, wz);
     }
 }

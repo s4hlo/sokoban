@@ -47,7 +47,8 @@ public class LevelManager
         {
             var entity = _world.World.Create(
                 new GridPosition(x, y, z),
-                new Player { Speed = 1f }
+                new Player { Speed = 1f },
+                new RenderPosition(GridView.ToWorld(_world.Grid, x, z, GridView.PieceY))
             );
             _world.Grid.SetOccupied(x, y, z, true);
         }
@@ -57,7 +58,8 @@ public class LevelManager
         {
             var entity = _world.World.Create(
                 new GridPosition(x, y, z),
-                new Box { Weight = weight }
+                new Box { Weight = weight },
+                new RenderPosition(GridView.ToWorld(_world.Grid, x, z, GridView.PieceY))
             );
             _world.Grid.SetOccupied(x, y, z, true);
         }

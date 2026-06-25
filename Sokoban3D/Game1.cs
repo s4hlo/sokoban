@@ -14,6 +14,7 @@ public class Game1 : Game
     private GameWorld _gameWorld;
     private LevelManager _levelManager;
     private MovementSystem _movementSystem;
+    private MoveAnimationSystem _animationSystem;
     private RenderSystem _renderSystem;
     private Camera _camera;
 
@@ -36,6 +37,7 @@ public class Game1 : Game
         _gameWorld = new GameWorld(8, 1, 8);
         _levelManager = new LevelManager(_gameWorld);
         _movementSystem = new MovementSystem(_gameWorld);
+        _animationSystem = new MoveAnimationSystem(_gameWorld);
 
         Log.Information("Game initialized");
 
@@ -54,6 +56,8 @@ public class Game1 : Game
         };
         testLevel.PlayerSpawns.Add((3, 0, 3));
         testLevel.BoxSpawns.Add((4, 0, 3, 1));
+        testLevel.BoxSpawns.Add((2, 0, 5, 1));
+        testLevel.BoxSpawns.Add((5, 0, 5, 1));
 
         _levelManager.LoadLevel(testLevel);
         Log.Information("Level loaded: {LevelName}", testLevel.Name);
@@ -69,6 +73,7 @@ public class Game1 : Game
             Exit();
 
         _movementSystem.Update(Keyboard.GetState());
+        _animationSystem.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
 
         base.Update(gameTime);
     }
