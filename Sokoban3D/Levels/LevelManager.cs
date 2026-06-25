@@ -16,65 +16,67 @@ public class Level
     public int Depth;
     public string Name;
 
+    /// <summary>Identidade do nível pra rastrear conclusão global. -1 = sem id (default).</summary>
+    public int Id = -1;
+
     // Dados: posições de player, caixas, objetivos, inimigos
     public List<(int X, int Y, int Z)> PlayerSpawns = new();
     public List<(int X, int Y, int Z, BoxType Type)> BoxSpawns = new();
     public List<(int X, int Y, int Z)> ObjectiveSpawns = new();
     public List<(int X, int Y, int Z)> EnemySpawns = new();
+
+    // Portais (entradas para níveis filhos): cada um leva ao nível LevelIndex; Completed muda a cor.
+    // Qualquer nível pode ter portais — é assim que a árvore se ramifica.
+    public List<(int X, int Y, int Z, int LevelIndex, bool Completed)> PortalSpawns = new();
 }
 
 /// <summary>
-/// Gerencia carregamento e transição de níveis
+/// Monta níveis dentro de uma sessão (GameWorld). É um serviço sem estado: cada método
+/// recebe a sessão sobre a qual opera, pra que a mesma instância sirva qualquer sessão
+/// da pilha de navegação.
 /// </summary>
 public class LevelManager
 {
-    private GameWorld _world;
-    private Level _currentLevel;
-
-    public LevelManager(GameWorld world)
+    public void LoadLevel(GameWorld session, Level level)
     {
-        _world = world;
-    }
-
-    public void LoadLevel(Level level)
-    {
-        _currentLevel = level;
+        session.CurrentLevel = level;
+        session.LevelId = level.Id;
 
         // Remove entidades de um nível anterior (importante pra troca de nível não duplicar).
-        DestroyAllEntities();
+        DestroyAllEntities(session);
 
-        // Reseta grid
-        _world.Grid.Clear();
+        // Ajusta o grid às dimensões do nível (realoca o mapa de ocupação zerado).
+        session.Grid.Resize(level.Width, level.Height, level.Depth);
 
         // Spawn player
         foreach (var (x, y, z) in level.PlayerSpawns)
         {
-            var entity = _world.World.Create(
+            var entity = session.World.Create(
                 new GridPosition(x, y, z),
                 new Player { Speed = 1f },
                 new SpawnPosition(x, y, z),
-                new RenderPosition(GridView.ToWorld(_world.Grid, x, z, GridView.PieceY))
+                new RenderPosition(GridView.ToWorld(session.Grid, x, z, GridView.PieceY))
             );
-            _world.Grid.SetOccupied(x, y, z, true);
+            session.Grid.SetOccupied(x, y, z, true);
         }
 
         // Spawn boxes
         foreach (var (x, y, z, type) in level.BoxSpawns)
         {
-            var entity = _world.World.Create(
+            var entity = session.World.Create(
                 new GridPosition(x, y, z),
                 new Box { Type = type },
                 new SpawnPosition(x, y, z),
-                new RenderPosition(GridView.ToWorld(_world.Grid, x, z, GridView.PieceY))
+                new RenderPosition(GridView.ToWorld(session.Grid, x, z, GridView.PieceY))
             );
-            _world.Grid.SetOccupied(x, y, z, true);
+            session.Grid.SetOccupied(x, y, z, true);
         }
 
         // Spawn objectives
         int objId = 0;
         foreach (var (x, y, z) in level.ObjectiveSpawns)
         {
-            var entity = _world.World.Create(
+            var entity = session.World.Create(
                 new GridPosition(x, y, z),
                 new Objective { Id = objId++ }
             );
@@ -84,12 +86,22 @@ public class LevelManager
         // Spawn enemies
         foreach (var (x, y, z) in level.EnemySpawns)
         {
-            var entity = _world.World.Create(
+            var entity = session.World.Create(
                 new GridPosition(x, y, z),
                 new Enemy { Speed = 0.5f },
                 new SpawnPosition(x, y, z)
             );
-            _world.Grid.SetOccupied(x, y, z, true);
+            session.Grid.SetOccupied(x, y, z, true);
+        }
+
+        // Spawn portais (entradas para níveis filhos; qualquer nível pode ter). Não ocupam
+        // o grid: o player precisa poder pisar em cima pra entrar.
+        foreach (var (x, y, z, levelIndex, completed) in level.PortalSpawns)
+        {
+            session.World.Create(
+                new GridPosition(x, y, z),
+                new LevelPortal { LevelIndex = levelIndex, Completed = completed }
+            );
         }
     }
 
@@ -100,54 +112,53 @@ public class LevelManager
     /// estado atual de TODAS as peças (inclui a caixa permanente/verde e frágeis quebradas),
     /// que é justamente o conjunto que o restart afeta — diferente de um movimento normal.
     /// </summary>
-    public void Restart(History history)
+    public void Restart(GameWorld session)
     {
-        if (_currentLevel == null)
+        if (session.CurrentLevel == null)
             return;
 
+        var history = session.History;
         var snapshot = new List<EntityState>();
         var query = new QueryDescription().WithAll<GridPosition, SpawnPosition>();
 
         // 1) Snapshot do estado atual pra permitir o undo do restart. A verde NÃO entra:
         //    o undo nunca a reverte (só o R a reposiciona); por isso, ao desfazer um R,
         //    tudo volta ao estado pré-R, mas a verde permanece no spawn.
-        _world.World.Query(in query, (Entity e, ref GridPosition pos) =>
+        session.World.Query(in query, (Entity e, ref GridPosition pos) =>
         {
-            if (_world.World.Has<Box>(e) && _world.World.Get<Box>(e).Type == BoxType.Permanent)
+            if (session.World.Has<Box>(e) && session.World.Get<Box>(e).Type == BoxType.Permanent)
                 return;
 
-            Box? boxState = _world.World.Has<Box>(e) ? _world.World.Get<Box>(e) : null;
+            Box? boxState = session.World.Has<Box>(e) ? session.World.Get<Box>(e) : null;
             snapshot.Add(new EntityState(e, pos, boxState));
         });
         history.Push(snapshot);
 
         // 2) Reposiciona cada peça pro spawn e reconstrói o grid do zero.
-        _world.Grid.Clear();
-        _world.World.Query(in query, (Entity e, ref GridPosition pos, ref SpawnPosition spawn) =>
+        session.Grid.Clear();
+        session.World.Query(in query, (Entity e, ref GridPosition pos, ref SpawnPosition spawn) =>
         {
             pos = new GridPosition(spawn.X, spawn.Y, spawn.Z);
 
             // Caixa que tinha quebrado volta inteira.
-            if (_world.World.Has<Box>(e))
+            if (session.World.Has<Box>(e))
             {
-                var box = _world.World.Get<Box>(e);
+                var box = session.World.Get<Box>(e);
                 box.Broken = false;
-                _world.World.Set(e, box);
+                session.World.Set(e, box);
             }
 
-            _world.Grid.SetOccupied(spawn.X, spawn.Y, spawn.Z, true);
+            session.Grid.SetOccupied(spawn.X, spawn.Y, spawn.Z, true);
         });
     }
 
-    private void DestroyAllEntities()
+    private static void DestroyAllEntities(GameWorld session)
     {
         var toDestroy = new List<Entity>();
         var query = new QueryDescription().WithAll<GridPosition>();
-        _world.World.Query(in query, (Entity entity) => toDestroy.Add(entity));
+        session.World.Query(in query, (Entity entity) => toDestroy.Add(entity));
 
         foreach (var entity in toDestroy)
-            _world.World.Destroy(entity);
+            session.World.Destroy(entity);
     }
-
-    public Level CurrentLevel => _currentLevel;
 }

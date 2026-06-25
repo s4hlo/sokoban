@@ -55,11 +55,24 @@ public static class BoxRules
 }
 
 /// <summary>
-/// Marca uma entity como objetivo (onde caixa deve ir)
+/// Marca uma entity como objetivo: a célula-meta que o player precisa alcançar
+/// para concluir o nível. Não ocupa o grid (o player pode pisar nela).
 /// </summary>
 public struct Objective
 {
     public int Id;
+}
+
+/// <summary>
+/// Marca uma célula como entrada (portal) para um nível filho. O player anda até ela e
+/// pressiona Enter para mergulhar no nível indicado. Qualquer nível pode ter portais — é
+/// assim que a árvore se ramifica. Não ocupa o grid.
+/// Completed = nível já concluído (muda a cor do portal).
+/// </summary>
+public struct LevelPortal
+{
+    public int LevelIndex;
+    public bool Completed;
 }
 
 /// <summary>

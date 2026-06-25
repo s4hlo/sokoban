@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using Arch.Core;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -12,14 +14,26 @@ namespace Sokoban3D;
 public class Game1 : Game
 {
     private GraphicsDeviceManager _graphics;
-    private GameWorld _gameWorld;
     private LevelManager _levelManager;
+    private LevelCatalog _catalog;
     private MovementSystem _movementSystem;
     private MoveAnimationSystem _animationSystem;
     private RenderSystem _renderSystem;
     private Camera _camera;
-    private History _history;
     private KeyboardState _previousKeyboard;
+
+    // Pilha de navegação na árvore de níveis: cada nível é uma sessão isolada (não há
+    // hub especial — a raiz é só mais um nível). O topo é a sessão ativa; entrar num
+    // portal empilha um filho; concluir o objetivo descarta o topo. O nível-pai fica
+    // preservado intacto enquanto você está num filho.
+    private readonly Stack<GameWorld> _stack = new();
+
+    // Cache de sessões por id de nível. Cada nível visitado mantém sua sessão viva aqui,
+    // então reentrar restaura o estado (caixas onde você deixou) em vez de reconstruir.
+    // A pilha guarda só o caminho atual na árvore; a preservação vem deste cache.
+    private readonly Dictionary<int, GameWorld> _sessions = new();
+
+    private GameWorld Active => _stack.Peek();
 
     public Game1()
     {
@@ -27,7 +41,6 @@ public class Game1 : Game
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
 
-        // Setup logging
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .WriteTo.Console()
@@ -36,12 +49,10 @@ public class Game1 : Game
 
     protected override void Initialize()
     {
-        // Grid plano: uma única camada (altura 1) no plano X/Z.
-        _gameWorld = new GameWorld(8, 1, 8);
-        _history = new History();
-        _levelManager = new LevelManager(_gameWorld);
-        _movementSystem = new MovementSystem(_gameWorld, _history);
-        _animationSystem = new MoveAnimationSystem(_gameWorld);
+        _levelManager = new LevelManager();
+        _catalog = new LevelCatalog();
+        _movementSystem = new MovementSystem();
+        _animationSystem = new MoveAnimationSystem();
 
         Log.Information("Game initialized");
 
@@ -50,38 +61,11 @@ public class Game1 : Game
 
     protected override void LoadContent()
     {
-        // Level básico: um player e uma caixa pra empurrar.
-        var testLevel = new Level
-        {
-            Name = "Level 1",
-            Width = 8,
-            Height = 1,
-            Depth = 8
-        };
-        testLevel.PlayerSpawns.Add((3, 0, 3));
-        // Pesada à direita do player (empurra 1 só).
-        testLevel.BoxSpawns.Add((4, 0, 3, BoxType.Heavy));
-        // Duas médias em fila abaixo do player (empurra as duas de uma vez).
-        testLevel.BoxSpawns.Add((3, 0, 5, BoxType.Medium));
-        testLevel.BoxSpawns.Add((3, 0, 6, BoxType.Medium));
-        testLevel.BoxSpawns.Add((3, 0, 4, BoxType.Medium));
-        // Leves em fila (carregadas de graça, mesmo várias).
-        testLevel.BoxSpawns.Add((5, 0, 5, BoxType.Light));
-        testLevel.BoxSpawns.Add((6, 0, 5, BoxType.Light));
-        // Frágeis: empurram como leve, mas quebram contra algo que não move.
-        // Acima do player (W três vezes empurra contra a parede de cima -> quebra).
-        testLevel.BoxSpawns.Add((3, 0, 0, BoxType.Fragile));
-        // À esquerda do player (A empurra até a borda; lá ela quebra).
-        testLevel.BoxSpawns.Add((1, 0, 3, BoxType.Fragile));
-        // Permanente (verde): empurra como pesada; o undo (Z) não a reverte, só o R.
-        testLevel.BoxSpawns.Add((3, 0, 2, BoxType.Permanent));
+        _renderSystem = new RenderSystem(GraphicsDevice);
 
-        _levelManager.LoadLevel(testLevel);
-        Log.Information("Level loaded: {LevelName}", testLevel.Name);
-
-        float aspect = GraphicsDevice.Viewport.AspectRatio;
-        _camera = new Camera(aspect, Vector3.Zero);
-        _renderSystem = new RenderSystem(_gameWorld, GraphicsDevice);
+        // Começa na raiz da árvore de níveis (um nível como qualquer outro).
+        _stack.Push(OpenLevel(LevelCatalog.RootId));
+        ReframeCamera();
     }
 
     protected override void Update(GameTime gameTime)
@@ -91,22 +75,157 @@ public class Game1 : Game
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || keyboard.IsKeyDown(Keys.Escape))
             Exit();
 
+        // Undo/restart funcionam em qualquer nível — cada sessão tem seu próprio histórico.
+        // T = suspender: sai pro pai PRESERVANDO este nível (volta exatamente onde parou).
         if (Pressed(keyboard, Keys.R))
-        {
-            // Restart empilha um snapshot no histórico, então o próprio R pode ser desfeito com Z.
-            _levelManager.Restart(_history);
-        }
+            _levelManager.Restart(Active);
         else if (Pressed(keyboard, Keys.Z))
-        {
-            _history.Undo(_gameWorld);
-        }
+            Active.History.Undo(Active);
+        else if (Pressed(keyboard, Keys.T))
+            SuspendLevel();
 
-        _movementSystem.Update(keyboard);
-        _animationSystem.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+        _movementSystem.Update(Active, keyboard);
+        _animationSystem.Update(Active, (float)gameTime.ElapsedGameTime.TotalSeconds);
+
+        // Pisar na meta CONCLUI o nível: volta pro pai e reseta este nível (próxima visita
+        // começa do zero). Senão, Enter sobre um portal mergulha no nível indicado.
+        if (PlayerOnObjective(Active))
+            CompleteLevel();
+        else if (Pressed(keyboard, Keys.Enter))
+            TryEnterPortal();
 
         _previousKeyboard = keyboard;
 
         base.Update(gameTime);
+    }
+
+    // ----- Pilha de níveis -----
+
+    /// <summary>
+    /// Abre o nível de id <paramref name="id"/>: devolve a sessão cacheada (estado preservado)
+    /// ou cria uma nova a partir da receita na primeira visita. Sempre ressincroniza os portais
+    /// com a conclusão global (um neto concluído noutro ramo deve aparecer verde aqui também).
+    /// </summary>
+    private GameWorld OpenLevel(int id)
+    {
+        if (!_sessions.TryGetValue(id, out var session))
+        {
+            var level = _catalog.BuildLevel(id);
+            session = new GameWorld(level.Width, level.Height, level.Depth);
+            _levelManager.LoadLevel(session, level);
+            _sessions[id] = session;
+        }
+
+        RefreshPortals(session);
+        return session;
+    }
+
+    /// <summary>No nível atual: se o player estiver sobre um portal, mergulha no nível dele.</summary>
+    private void TryEnterPortal()
+    {
+        var playerPos = FindPlayerCell(Active);
+        if (playerPos is null)
+            return;
+
+        var p = playerPos.Value;
+        int target = -1;
+        var query = new QueryDescription().WithAll<LevelPortal, GridPosition>();
+        Active.World.Query(in query, (ref LevelPortal portal, ref GridPosition g) =>
+        {
+            if (g.X == p.X && g.Z == p.Z)
+                target = portal.LevelIndex;
+        });
+
+        if (target < 0)
+            return;
+
+        _stack.Push(OpenLevel(target));
+        ReframeCamera();
+        Log.Information("Entered level {Id}", target);
+    }
+
+    /// <summary>
+    /// Conclui o nível ativo (chegou na meta): marca como concluído e volta ao pai, DESCARTANDO
+    /// a sessão. Como sai do cache, a próxima visita reconstrói o nível do zero — estado e
+    /// histórico limpos. Pra sair preservando o nível, use o T (<see cref="SuspendLevel"/>).
+    /// </summary>
+    private void CompleteLevel()
+    {
+        // A raiz da árvore não tem pai pra onde voltar; guarda genérica (ela também não
+        // tem objetivo, então na prática nunca chega aqui).
+        if (_stack.Count <= 1)
+            return;
+
+        var done = _stack.Pop();
+        _sessions.Remove(done.LevelId);
+        done.Dispose();
+        _catalog.MarkCompleted(done.LevelId);
+        Log.Information("Level {Id} completed (reset)", done.LevelId);
+
+        // Atualiza os portais do pai pra refletir a conclusão (o que acabou de ficar verde).
+        RefreshPortals(Active);
+        ReframeCamera();
+    }
+
+    /// <summary>
+    /// Suspende o nível ativo (tecla T): volta ao pai sem concluir, MANTENDO a sessão no cache.
+    /// Reentrar restaura o nível exatamente onde parou (caixas e histórico). É o oposto de
+    /// concluir pela meta, que reseta. Na raiz não faz nada (não há pai pra onde voltar).
+    /// </summary>
+    private void SuspendLevel()
+    {
+        if (_stack.Count <= 1)
+            return;
+
+        var suspended = _stack.Pop(); // permanece em _sessions, preservado
+        Log.Information("Level {Id} suspended (preserved)", suspended.LevelId);
+
+        RefreshPortals(Active);
+        ReframeCamera();
+    }
+
+    /// <summary>Sincroniza o estado "concluído" dos portais de uma sessão com o registro global.</summary>
+    private void RefreshPortals(GameWorld session)
+    {
+        var query = new QueryDescription().WithAll<LevelPortal>();
+        session.World.Query(in query, (ref LevelPortal portal) =>
+        {
+            portal.Completed = _catalog.IsCompleted(portal.LevelIndex);
+        });
+    }
+
+    private void ReframeCamera()
+    {
+        float aspect = GraphicsDevice.Viewport.AspectRatio;
+        _camera = new Camera(aspect, Active.Grid.Width, Active.Grid.Depth);
+    }
+
+    // ----- Consultas ao mundo -----
+
+    /// <summary>True se a célula do player coincide com a de algum objetivo do nível.</summary>
+    private static bool PlayerOnObjective(GameWorld session)
+    {
+        var playerPos = FindPlayerCell(session);
+        if (playerPos is null)
+            return false;
+
+        var p = playerPos.Value;
+        bool reached = false;
+        var query = new QueryDescription().WithAll<Objective, GridPosition>();
+        session.World.Query(in query, (ref GridPosition o) =>
+        {
+            if (o.X == p.X && o.Y == p.Y && o.Z == p.Z)
+                reached = true;
+        });
+        return reached;
+    }
+
+    private static GridPosition? FindPlayerCell(GameWorld session)
+    {
+        GridPosition? found = null;
+        var query = new QueryDescription().WithAll<Player, GridPosition>();
+        session.World.Query(in query, (ref GridPosition p) => found = p);
+        return found;
     }
 
     // Detecção de borda: tecla recém-pressionada neste frame.
@@ -119,7 +238,7 @@ public class Game1 : Game
         GraphicsDevice.DepthStencilState = DepthStencilState.Default;
         GraphicsDevice.RasterizerState = RasterizerState.CullCounterClockwise;
 
-        _renderSystem.Draw(_camera.View, _camera.Projection);
+        _renderSystem.Draw(Active, _camera.View, _camera.Projection);
 
         base.Draw(gameTime);
     }
@@ -128,7 +247,11 @@ public class Game1 : Game
     {
         if (disposing)
         {
-            _gameWorld?.Dispose();
+            // O cache é dono de todas as sessões (a pilha só referencia um subconjunto).
+            foreach (var session in _sessions.Values)
+                session.Dispose();
+            _sessions.Clear();
+            _stack.Clear();
             Log.CloseAndFlush();
         }
         base.Dispose(disposing);

@@ -15,6 +15,11 @@ public class RenderSystem
     private static readonly Color FloorColor = new(60, 60, 70);
     private static readonly Color PlayerColor = new(70, 130, 220);
 
+    // Meta do nível (dourado) e portais para níveis filhos (ciano; verde quando concluído).
+    private static readonly Color ObjectiveColor = new(235, 200, 70);
+    private static readonly Color PortalColor = new(70, 200, 210);
+    private static readonly Color PortalDoneColor = new(70, 200, 110);
+
     // Cor por tipo de caixa: leve clara, média intermediária, pesada escura, frágil avermelhada.
     private static readonly Color LightBoxColor = new(210, 180, 140);
     private static readonly Color MediumBoxColor = new(160, 110, 60);
@@ -22,19 +27,47 @@ public class RenderSystem
     private static readonly Color FragileBoxColor = new(205, 120, 120);
     private static readonly Color PermanentBoxColor = new(60, 170, 75);
 
-    private readonly GameWorld _world;
+    // Sessão ativa do frame. O CubeRenderer (preso ao device) é reutilizado entre sessões.
+    private GameWorld _world;
     private readonly CubeRenderer _cubes;
 
-    public RenderSystem(GameWorld world, GraphicsDevice device)
+    public RenderSystem(GraphicsDevice device)
     {
-        _world = world;
         _cubes = new CubeRenderer(device);
     }
 
-    public void Draw(Matrix view, Matrix projection)
+    public void Draw(GameWorld session, Matrix view, Matrix projection)
     {
+        _world = session;
         DrawFloor(view, projection);
+        DrawMarkers(view, projection);
         DrawEntities(view, projection);
+    }
+
+    /// <summary>
+    /// Desenha marcadores que não se movem nem ocupam o grid — objetivos e portais —
+    /// como tiles planos sobre o chão, na célula lógica (sem interpolação).
+    /// </summary>
+    private void DrawMarkers(Matrix view, Matrix projection)
+    {
+        var grid = _world.Grid;
+        var tileScale = new Vector3(0.7f, 0.1f, 0.7f);
+        float markerY = GridView.FloorY + 0.15f;
+
+        var objectives = new QueryDescription().WithAll<Objective, GridPosition>();
+        _world.World.Query(in objectives, (ref GridPosition p) =>
+        {
+            var pos = GridView.ToWorld(grid, p.X, p.Z, markerY);
+            _cubes.Draw(pos, tileScale, ObjectiveColor, view, projection);
+        });
+
+        var portals = new QueryDescription().WithAll<LevelPortal, GridPosition>();
+        _world.World.Query(in portals, (ref LevelPortal portal, ref GridPosition p) =>
+        {
+            var pos = GridView.ToWorld(grid, p.X, p.Z, markerY);
+            var color = portal.Completed ? PortalDoneColor : PortalColor;
+            _cubes.Draw(pos, tileScale, color, view, projection);
+        });
     }
 
     private void DrawFloor(Matrix view, Matrix projection)

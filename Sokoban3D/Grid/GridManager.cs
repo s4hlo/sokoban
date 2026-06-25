@@ -5,14 +5,26 @@ namespace Sokoban3D.Grid;
 /// </summary>
 public class GridManager
 {
-    private readonly int _width;
-    private readonly int _height;
-    private readonly int _depth;
+    private int _width;
+    private int _height;
+    private int _depth;
 
     // Mapa de ocupação: true = espaço ocupado
-    private readonly bool[,,] _occupied;
+    private bool[,,] _occupied;
 
     public GridManager(int width, int height, int depth)
+    {
+        _width = width;
+        _height = height;
+        _depth = depth;
+        _occupied = new bool[width, height, depth];
+    }
+
+    /// <summary>
+    /// Redimensiona o grid para as dimensões de um novo nível, realocando o mapa de
+    /// ocupação zerado. Cada nível tem seu próprio tamanho.
+    /// </summary>
+    public void Resize(int width, int height, int depth)
     {
         _width = width;
         _height = height;

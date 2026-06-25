@@ -17,21 +17,14 @@ public class MoveAnimationSystem
     private const float Smoothing = 18f;
     private const float SnapDistanceSq = 0.0001f;
 
-    private readonly GameWorld _world;
-
-    public MoveAnimationSystem(GameWorld world)
-    {
-        _world = world;
-    }
-
-    public void Update(float deltaSeconds)
+    public void Update(GameWorld session, float deltaSeconds)
     {
         float t = 1f - MathF.Exp(-Smoothing * deltaSeconds);
 
         var query = new QueryDescription().WithAll<GridPosition, RenderPosition>();
-        _world.World.Query(in query, (ref GridPosition grid, ref RenderPosition render) =>
+        session.World.Query(in query, (ref GridPosition grid, ref RenderPosition render) =>
         {
-            var target = GridView.ToWorld(_world.Grid, grid.X, grid.Z, GridView.PieceY);
+            var target = GridView.ToWorld(session.Grid, grid.X, grid.Z, GridView.PieceY);
             render.Value = Vector3.Lerp(render.Value, target, t);
 
             // Encaixa quando já está praticamente no lugar, pra não ficar derivando pra sempre.

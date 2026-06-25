@@ -17,18 +17,18 @@ public class MovementSystem
     // Força do player: soma máxima de pesos de caixas que ele consegue empurrar de uma vez.
     private const int PlayerPushStrength = 2;
 
-    private readonly GameWorld _world;
-    private readonly History _history;
+    // Sessão ativa do frame atual. Definida no início de cada Update; os métodos
+    // auxiliares (TryClear, etc.) operam sobre ela. Permite a mesma instância de
+    // sistema servir qualquer sessão da pilha de navegação.
+    private GameWorld _world;
+    private History _history;
     private KeyboardState _previous;
 
-    public MovementSystem(GameWorld world, History history)
+    public void Update(GameWorld session, KeyboardState keyboard)
     {
-        _world = world;
-        _history = history;
-    }
+        _world = session;
+        _history = session.History;
 
-    public void Update(KeyboardState keyboard)
-    {
         (int dx, int dz) = GetFreshDirection(keyboard);
         _previous = keyboard;
 
