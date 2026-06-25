@@ -8,8 +8,9 @@ namespace Sokoban3D.ECS.Systems;
 
 /// <summary>
 /// Input e movimento do player no plano X/Z. Um passo por tecla pressionada.
-/// Ao andar contra uma fila de caixas, empurra todas se a soma dos pesos couber na
-/// força do player e a célula no fim da fila estiver livre.
+/// O empurrão é resolvido recursivamente célula a célula: cada caixa só anda se a
+/// célula à frente puder ser liberada e ainda houver "força" (peso) sobrando. Uma
+/// caixa frágil que não consegue avançar quebra em vez de bloquear.
 /// </summary>
 public class MovementSystem
 {
@@ -49,17 +50,16 @@ public class MovementSystem
         if (!_world.Grid.IsValid(targetX, pos.Y, targetZ))
             return;
 
-        var record = new List<EntityMove>();
+        var record = new List<EntityState>();
 
         if (_world.Grid.IsOccupied(targetX, pos.Y, targetZ))
         {
-            // Só dá pra avançar se a fila de caixas à frente puder ser empurrada.
-            if (!TryPushChain(targetX, pos.Y, targetZ, dx, dz, record))
+            // Só avança se a célula alvo puder ser liberada (empurrando ou quebrando).
+            if (!TryClear(targetX, pos.Y, targetZ, dx, dz, PlayerPushStrength, record))
                 return;
         }
 
-        // Move o player (a célula alvo já está livre se houve empurrão).
-        record.Add(new EntityMove(player, pos));
+        record.Add(new EntityState(player, pos, null));
         _world.Grid.SetOccupied(pos.X, pos.Y, pos.Z, false);
         _world.Grid.SetOccupied(targetX, pos.Y, targetZ, true);
         _world.World.Set(player, new GridPosition(targetX, pos.Y, targetZ));
@@ -68,60 +68,74 @@ public class MovementSystem
     }
 
     /// <summary>
-    /// Tenta empurrar a fila de caixas que começa em (x,y,z), na direção (dx,dz).
-    /// Sucesso se a soma dos pesos ≤ força do player e houver célula livre no fim.
+    /// Tenta liberar a célula (x,y,z) na direção (dx,dz). Retorna true se a célula ficou
+    /// livre (estava vazia, a caixa foi empurrada, ou a caixa frágil quebrou).
+    /// Só causa mutações nos caminhos que terminam em sucesso.
     /// </summary>
-    private bool TryPushChain(int x, int y, int z, int dx, int dz, List<EntityMove> record)
+    private bool TryClear(int x, int y, int z, int dx, int dz, int budget, List<EntityState> record)
     {
-        var chain = new List<Entity>();
-        int totalWeight = 0;
+        if (!_world.Grid.IsValid(x, y, z))
+            return false; // parede
 
-        int cx = x, cz = z;
-        while (true)
+        if (!_world.Grid.IsOccupied(x, y, z))
+            return true; // já está livre
+
+        Entity? boxEntity = FindBoxAt(x, y, z);
+        if (boxEntity is null)
+            return false; // ocupado por algo que não é caixa
+
+        var box = _world.World.Get<Box>(boxEntity.Value);
+        int weight = BoxRules.Weight(box.Type);
+        if (weight > budget)
+            return false; // pesada demais pra força restante: não sai do lugar
+
+        int aheadX = x + dx;
+        int aheadZ = z + dz;
+
+        // Caixa sem peso (leve/frágil) não transmite força: passa orçamento 0 pra frente,
+        // então não empurra nada com peso. Prensada contra média/pesada, a frágil quebra
+        // e a leve só trava (ver abaixo). As com peso repassam a força que sobra.
+        int forwardBudget = weight == 0 ? 0 : budget - weight;
+        bool aheadClear = TryClear(aheadX, y, aheadZ, dx, dz, forwardBudget, record);
+
+        if (aheadClear)
         {
-            if (!_world.Grid.IsValid(cx, y, cz))
-                return false; // a fila esbarra numa parede
-
-            if (!_world.Grid.IsOccupied(cx, y, cz))
-                break; // achou célula livre: fim da fila
-
-            Entity? box = FindBoxAt(cx, y, cz);
-            if (box is null)
-                return false; // ocupado por algo que não é caixa
-
-            chain.Add(box.Value);
-            totalWeight += BoxRules.Weight(_world.World.Get<Box>(box.Value).Type);
-
-            cx += dx;
-            cz += dz;
+            // Empurra a caixa pra frente.
+            record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), box));
+            _world.Grid.SetOccupied(x, y, z, false);
+            _world.Grid.SetOccupied(aheadX, y, aheadZ, true);
+            _world.World.Set(boxEntity.Value, new GridPosition(aheadX, y, aheadZ));
+            return true;
         }
 
-        if (totalWeight > PlayerPushStrength)
-            return false; // pesado demais
-
-        // Empurra de trás pra frente, pra cada caixa cair numa célula já liberada.
-        for (int i = chain.Count - 1; i >= 0; i--)
+        // Não dá pra avançar. Frágil quebra (e libera a célula); o resto fica travado.
+        if (box.Type == BoxType.Fragile)
         {
-            var p = _world.World.Get<GridPosition>(chain[i]);
-            int nx = p.X + dx;
-            int nz = p.Z + dz;
-
-            record.Add(new EntityMove(chain[i], p));
-            _world.Grid.SetOccupied(p.X, p.Y, p.Z, false);
-            _world.Grid.SetOccupied(nx, p.Y, nz, true);
-            _world.World.Set(chain[i], new GridPosition(nx, p.Y, nz));
+            record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), box));
+            BreakBox(boxEntity.Value);
+            return true;
         }
 
-        return true;
+        return false;
+    }
+
+    private void BreakBox(Entity entity)
+    {
+        var p = _world.World.Get<GridPosition>(entity);
+        _world.Grid.SetOccupied(p.X, p.Y, p.Z, false);
+
+        var box = _world.World.Get<Box>(entity);
+        box.Broken = true;
+        _world.World.Set(entity, box);
     }
 
     private Entity? FindBoxAt(int x, int y, int z)
     {
         Entity? found = null;
         var query = new QueryDescription().WithAll<Box, GridPosition>();
-        _world.World.Query(in query, (Entity entity, ref GridPosition p) =>
+        _world.World.Query(in query, (Entity entity, ref Box b, ref GridPosition p) =>
         {
-            if (p.X == x && p.Y == y && p.Z == z)
+            if (!b.Broken && p.X == x && p.Y == y && p.Z == z)
                 found = entity;
         });
         return found;

@@ -13,17 +13,21 @@ public struct Player
 /// </summary>
 public enum BoxType
 {
-    Light,  // leve: sem peso, carregada de graça (até por outra caixa)
-    Medium, // média: o player empurra até duas em fila
-    Heavy,  // pesada: só uma por vez
+    Light,   // leve: sem peso, carregada de graça (até por outra caixa)
+    Medium,  // média: o player empurra até duas em fila
+    Heavy,   // pesada: só uma por vez
+    Fragile, // frágil: empurra como leve, mas quebra se for contra algo que não move
 }
 
 /// <summary>
 /// Marca uma entity como caixa, com seu tipo.
+/// Broken = caixa quebrada (frágil destruída): não ocupa grid nem é desenhada,
+/// mas a entity persiste pra que o undo consiga reverter a quebra.
 /// </summary>
 public struct Box
 {
     public BoxType Type;
+    public bool Broken;
 }
 
 /// <summary>
@@ -37,6 +41,7 @@ public static class BoxRules
         BoxType.Light => 0,
         BoxType.Medium => 1,
         BoxType.Heavy => 2,
+        BoxType.Fragile => 0,
         _ => 1,
     };
 }

@@ -68,6 +68,11 @@ public class Game1 : Game
         // Leves em fila (carregadas de graça, mesmo várias).
         testLevel.BoxSpawns.Add((5, 0, 5, BoxType.Light));
         testLevel.BoxSpawns.Add((6, 0, 5, BoxType.Light));
+        // Frágeis: empurram como leve, mas quebram contra algo que não move.
+        // Acima do player (W três vezes empurra contra a parede de cima -> quebra).
+        testLevel.BoxSpawns.Add((3, 0, 0, BoxType.Fragile));
+        // À esquerda do player (A empurra até a borda; lá ela quebra).
+        testLevel.BoxSpawns.Add((1, 0, 3, BoxType.Fragile));
 
         _levelManager.LoadLevel(testLevel);
         Log.Information("Level loaded: {LevelName}", testLevel.Name);
