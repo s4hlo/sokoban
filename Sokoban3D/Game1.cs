@@ -80,7 +80,12 @@ public class Game1 : Game
         if (Pressed(keyboard, Keys.R))
             _levelManager.Restart(Active);
         else if (Pressed(keyboard, Keys.Z))
-            Active.History.Undo(Active);
+        {
+            // Desfaz a última ação. Se o player estava caído, o undo o traz de volta a uma
+            // posição segura — então deixa de estar congelado.
+            if (Active.History.Undo(Active))
+                Active.PlayerFell = false;
+        }
         else if (Pressed(keyboard, Keys.T))
             SuspendLevel();
 
@@ -236,6 +241,8 @@ public class Game1 : Game
     {
         GraphicsDevice.Clear(Color.CornflowerBlue);
         GraphicsDevice.DepthStencilState = DepthStencilState.Default;
+        // Descarta a face traseira (convenção do MonoGame). O cubo é enrolado pra isso em
+        // CubeRenderer.BuildCube, então só as faces externas são desenhadas.
         GraphicsDevice.RasterizerState = RasterizerState.CullCounterClockwise;
 
         _renderSystem.Draw(Active, _camera.View, _camera.Projection);

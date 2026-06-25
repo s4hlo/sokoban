@@ -59,6 +59,9 @@ public class CubeRenderer
 
     /// <summary>
     /// Monta um cubo unitário com 24 vértices (4 por face) e normais por face.
+    /// Os triângulos são enrolados em sentido horário visto de fora (a,c,b / a,d,c), que é
+    /// a convenção de face-da-frente do MonoGame (RasterizerState.CullCounterClockwise).
+    /// Assim o descarte de face traseira mantém as faces externas e some com as internas.
     /// </summary>
     private static (VertexPositionNormalTexture[] verts, short[] inds) BuildCube()
     {
@@ -97,11 +100,11 @@ public class CubeRenderer
 
             int i = f * 6;
             inds[i + 0] = (short)(v + 0);
-            inds[i + 1] = (short)(v + 1);
-            inds[i + 2] = (short)(v + 2);
+            inds[i + 1] = (short)(v + 2);
+            inds[i + 2] = (short)(v + 1);
             inds[i + 3] = (short)(v + 0);
-            inds[i + 4] = (short)(v + 2);
-            inds[i + 5] = (short)(v + 3);
+            inds[i + 4] = (short)(v + 3);
+            inds[i + 5] = (short)(v + 2);
         }
 
         return (verts, inds);

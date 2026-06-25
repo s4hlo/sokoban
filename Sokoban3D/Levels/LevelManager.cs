@@ -25,6 +25,30 @@ public class Level
     public List<(int X, int Y, int Z)> ObjectiveSpawns = new();
     public List<(int X, int Y, int Z)> EnemySpawns = new();
 
+    // Obstáculos: blocos sólidos fixos que formam o terreno. Empilhados (vários Y na mesma
+    // coluna) viram paredes; uma camada inteira em y=0 é o piso onde as peças andam.
+    public List<(int X, int Y, int Z)> ObstacleSpawns = new();
+
+    /// <summary>
+    /// Preenche uma camada inteira (todo X/Z) de obstáculos na altura <paramref name="y"/>.
+    /// É o piso padrão: sem buracos, ninguém cai. Remover obstáculos depois abre buracos.
+    /// </summary>
+    public void FillFloor(int y = 0)
+    {
+        for (int x = 0; x < Width; x++)
+            for (int z = 0; z < Depth; z++)
+                ObstacleSpawns.Add((x, y, z));
+    }
+
+    /// <summary>
+    /// Abre um buraco: remove o obstáculo da coluna (x,z) na altura <paramref name="y"/>.
+    /// O player que pisar ali sem nada sólido embaixo cai.
+    /// </summary>
+    public void DigHole(int x, int z, int y = 0)
+    {
+        ObstacleSpawns.RemoveAll(o => o.X == x && o.Y == y && o.Z == z);
+    }
+
     // Portais (entradas para níveis filhos): cada um leva ao nível LevelIndex; Completed muda a cor.
     // Qualquer nível pode ter portais — é assim que a árvore se ramifica.
     public List<(int X, int Y, int Z, int LevelIndex, bool Completed)> PortalSpawns = new();
@@ -47,6 +71,18 @@ public class LevelManager
 
         // Ajusta o grid às dimensões do nível (realoca o mapa de ocupação zerado).
         session.Grid.Resize(level.Width, level.Height, level.Depth);
+        session.PlayerFell = false;
+
+        // Spawn obstáculos (terreno). São estáticos: ocupam o grid, mas não têm
+        // RenderPosition — o render os desenha direto da célula lógica.
+        foreach (var (x, y, z) in level.ObstacleSpawns)
+        {
+            session.World.Create(
+                new GridPosition(x, y, z),
+                new Obstacle()
+            );
+            session.Grid.SetOccupied(x, y, z, true);
+        }
 
         // Spawn player
         foreach (var (x, y, z) in level.PlayerSpawns)
@@ -55,7 +91,7 @@ public class LevelManager
                 new GridPosition(x, y, z),
                 new Player { Speed = 1f },
                 new SpawnPosition(x, y, z),
-                new RenderPosition(GridView.ToWorld(session.Grid, x, z, GridView.PieceY))
+                new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise))
             );
             session.Grid.SetOccupied(x, y, z, true);
         }
@@ -67,7 +103,7 @@ public class LevelManager
                 new GridPosition(x, y, z),
                 new Box { Type = type },
                 new SpawnPosition(x, y, z),
-                new RenderPosition(GridView.ToWorld(session.Grid, x, z, GridView.PieceY))
+                new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise))
             );
             session.Grid.SetOccupied(x, y, z, true);
         }
@@ -134,8 +170,17 @@ public class LevelManager
         });
         history.Push(snapshot);
 
-        // 2) Reposiciona cada peça pro spawn e reconstrói o grid do zero.
+        // 2) Reposiciona cada peça pro spawn e reconstrói o grid do zero. O player deixa
+        //    de estar "caído".
         session.Grid.Clear();
+        session.PlayerFell = false;
+
+        // Obstáculos não têm SpawnPosition (não se movem), então o Clear acima apagaria a
+        // ocupação deles. Remarca o terreno antes de repor as peças.
+        var obstacles = new QueryDescription().WithAll<Obstacle, GridPosition>();
+        session.World.Query(in obstacles, (ref GridPosition pos) =>
+            session.Grid.SetOccupied(pos.X, pos.Y, pos.Z, true));
+
         session.World.Query(in query, (Entity e, ref GridPosition pos, ref SpawnPosition spawn) =>
         {
             pos = new GridPosition(spawn.X, spawn.Y, spawn.Z);

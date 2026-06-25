@@ -12,8 +12,13 @@ namespace Sokoban3D.ECS.Systems;
 /// </summary>
 public class RenderSystem
 {
-    private static readonly Color FloorColor = new(60, 60, 70);
+    // Chão-morte: laje escura no fundo, visível pelos buracos. Pisar nela mata.
+    private static readonly Color DeathFloorColor = new(35, 20, 25);
+    // Obstáculos (terreno sólido onde se anda).
+    private static readonly Color ObstacleColor = new(95, 100, 115);
     private static readonly Color PlayerColor = new(70, 130, 220);
+    // Player caído (congelado no chão-morte): avermelhado pra sinalizar a morte.
+    private static readonly Color PlayerFellColor = new(200, 70, 70);
 
     // Meta do nível (dourado) e portais para níveis filhos (ciano; verde quando concluído).
     private static readonly Color ObjectiveColor = new(235, 200, 70);
@@ -39,7 +44,8 @@ public class RenderSystem
     public void Draw(GameWorld session, Matrix view, Matrix projection)
     {
         _world = session;
-        DrawFloor(view, projection);
+        DrawDeathFloor(view, projection);
+        DrawObstacles(view, projection);
         DrawMarkers(view, projection);
         DrawEntities(view, projection);
     }
@@ -52,45 +58,68 @@ public class RenderSystem
     {
         var grid = _world.Grid;
         var tileScale = new Vector3(0.7f, 0.1f, 0.7f);
-        float markerY = GridView.FloorY + 0.15f;
 
         var objectives = new QueryDescription().WithAll<Objective, GridPosition>();
         _world.World.Query(in objectives, (ref GridPosition p) =>
         {
-            var pos = GridView.ToWorld(grid, p.X, p.Z, markerY);
+            var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
             _cubes.Draw(pos, tileScale, ObjectiveColor, view, projection);
         });
 
         var portals = new QueryDescription().WithAll<LevelPortal, GridPosition>();
         _world.World.Query(in portals, (ref LevelPortal portal, ref GridPosition p) =>
         {
-            var pos = GridView.ToWorld(grid, p.X, p.Z, markerY);
+            var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
             var color = portal.Completed ? PortalDoneColor : PortalColor;
             _cubes.Draw(pos, tileScale, color, view, projection);
         });
     }
 
-    private void DrawFloor(Matrix view, Matrix projection)
+    /// <summary>
+    /// Chão-morte: a laje sólida do fundo (na "célula" de grid Y = -1), abaixo do terreno.
+    /// Aparece pelos buracos; o player que pousa direto nela morre.
+    /// </summary>
+    private void DrawDeathFloor(Matrix view, Matrix projection)
     {
         var grid = _world.Grid;
-        var scale = new Vector3(0.95f, 0.2f, 0.95f);
+        // Laje fina e plana, claramente abaixo da base do terreno (que começa em y=0 de mundo).
+        var scale = new Vector3(1f, 0.2f, 1f);
 
         for (int x = 0; x < grid.Width; x++)
             for (int z = 0; z < grid.Depth; z++)
             {
-                var pos = GridView.ToWorld(grid, x, z, GridView.FloorY);
-                _cubes.Draw(pos, scale, FloorColor, view, projection);
+                var pos = GridView.ToWorld(grid, x, -1, z, GridView.DeathFloorRise);
+                _cubes.Draw(pos, scale, DeathFloorColor, view, projection);
             }
+    }
+
+    /// <summary>
+    /// Obstáculos: o terreno sólido. Cubos cheios na altura, levemente encolhidos em X/Z pra
+    /// aparecer a emenda entre blocos (lê melhor o relevo); a altura fica cheia pra os topos
+    /// alinharem com a base das peças e os empilhamentos ficarem coesos.
+    /// </summary>
+    private void DrawObstacles(Matrix view, Matrix projection)
+    {
+        var grid = _world.Grid;
+        var scale = new Vector3(0.96f, 1f, 0.96f);
+
+        var query = new QueryDescription().WithAll<Obstacle, GridPosition>();
+        _world.World.Query(in query, (ref GridPosition p) =>
+        {
+            var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.ObstacleRise);
+            _cubes.Draw(pos, scale, ObstacleColor, view, projection);
+        });
     }
 
     private void DrawEntities(Matrix view, Matrix projection)
     {
         var pieceScale = new Vector3(0.8f);
 
+        var playerColor = _world.PlayerFell ? PlayerFellColor : PlayerColor;
         var players = new QueryDescription().WithAll<Player, RenderPosition>();
         _world.World.Query(in players, (ref RenderPosition r) =>
         {
-            _cubes.Draw(r.Value, pieceScale, PlayerColor, view, projection);
+            _cubes.Draw(r.Value, pieceScale, playerColor, view, projection);
         });
 
         var boxes = new QueryDescription().WithAll<Box, RenderPosition>();

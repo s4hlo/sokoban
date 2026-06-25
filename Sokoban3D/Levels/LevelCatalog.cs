@@ -38,25 +38,37 @@ public class LevelCatalog
     // qualquer; só não tem meta, então sai-se dele descendo num portal (ou Esc pra fechar).
     private Level BuildRoot()
     {
-        var level = new Level { Id = 0, Name = "Raiz", Width = 11, Height = 1, Depth = 11 };
-        level.PlayerSpawns.Add((5, 0, 9));
-        level.PortalSpawns.Add((3, 0, 3, 1, IsCompleted(1)));
-        level.PortalSpawns.Add((5, 0, 3, 2, IsCompleted(2)));
-        level.PortalSpawns.Add((7, 0, 3, 3, IsCompleted(3)));
-        level.BoxSpawns.Add((2, 0, 6, BoxType.Heavy));
-        level.BoxSpawns.Add((8, 0, 6, BoxType.Permanent));
+        // Height >= 3 pra caber uma parede de 2 de altura (demo do flavor 3D). As peças
+        // andam em y=1, sobre o piso de obstáculos em y=0.
+        var level = new Level { Id = 0, Name = "Raiz", Width = 11, Height = 4, Depth = 11 };
+        level.FillFloor();
+        level.PlayerSpawns.Add((5, 1, 9));
+        level.PortalSpawns.Add((3, 1, 3, 1, IsCompleted(1)));
+        level.PortalSpawns.Add((5, 1, 3, 2, IsCompleted(2)));
+        level.PortalSpawns.Add((7, 1, 3, 3, IsCompleted(3)));
+        level.BoxSpawns.Add((2, 1, 6, BoxType.Heavy));
+        level.BoxSpawns.Add((8, 1, 6, BoxType.Permanent));
+
+        // --- Demo do flavor 3D (remova à vontade ao desenhar o nível pra valer) ---
+        // Buraco no canto: ande até (1,1) pra cair no chão-morte e testar o congelamento.
+        level.DigHole(1, 1);
+        level.DigHole(1, 2);
+        // Parede de 2 de altura: bloqueia o movimento e não dá pra subir.
+        level.ObstacleSpawns.Add((5, 1, 6));
+        level.ObstacleSpawns.Add((5, 2, 6));
         return level;
     }
 
     // Id 1 — "Aquecimento": caminho quase livre, prova o ciclo entrar→meta→voltar.
     private static Level BuildAquecimento()
     {
-        var level = new Level { Id = 1, Name = "Aquecimento", Width = 7, Height = 1, Depth = 7 };
-        level.PlayerSpawns.Add((3, 0, 5));
-        level.ObjectiveSpawns.Add((3, 0, 1));
-        level.BoxSpawns.Add((1, 0, 3, BoxType.Heavy));
-        level.BoxSpawns.Add((5, 0, 3, BoxType.Light));
-        level.BoxSpawns.Add((5, 0, 5, BoxType.Permanent));
+        var level = new Level { Id = 1, Name = "Aquecimento", Width = 7, Height = 4, Depth = 7 };
+        level.FillFloor();
+        level.PlayerSpawns.Add((3, 1, 5));
+        level.ObjectiveSpawns.Add((3, 1, 1));
+        level.BoxSpawns.Add((1, 1, 3, BoxType.Heavy));
+        level.BoxSpawns.Add((5, 1, 3, BoxType.Light));
+        level.BoxSpawns.Add((5, 1, 5, BoxType.Permanent));
         return level;
     }
 
@@ -64,31 +76,33 @@ public class LevelCatalog
     // É um nível que também ramifica: dá pra mergulhar no 3 e voltar, ou ir direto à meta.
     private Level BuildDesvio()
     {
-        var level = new Level { Id = 2, Name = "Desvio", Width = 9, Height = 1, Depth = 9 };
-        level.PlayerSpawns.Add((4, 0, 7));
-        level.ObjectiveSpawns.Add((1, 0, 1));
+        var level = new Level { Id = 2, Name = "Desvio", Width = 9, Height = 4, Depth = 9 };
+        level.FillFloor();
+        level.PlayerSpawns.Add((4, 1, 7));
+        level.ObjectiveSpawns.Add((1, 1, 1));
         // Parede em z=4 com brecha em x=2.
-        level.BoxSpawns.Add((3, 0, 4, BoxType.Medium));
-        level.BoxSpawns.Add((4, 0, 4, BoxType.Medium));
-        level.BoxSpawns.Add((5, 0, 4, BoxType.Medium));
-        level.BoxSpawns.Add((6, 0, 4, BoxType.Heavy));
-        level.BoxSpawns.Add((6, 0, 6, BoxType.Permanent));
+        level.BoxSpawns.Add((3, 1, 4, BoxType.Medium));
+        level.BoxSpawns.Add((4, 1, 4, BoxType.Medium));
+        level.BoxSpawns.Add((5, 1, 4, BoxType.Medium));
+        level.BoxSpawns.Add((6, 1, 4, BoxType.Heavy));
+        level.BoxSpawns.Add((6, 1, 6, BoxType.Permanent));
         // Portal interno: este nível também ramifica para o nível 3.
-        level.PortalSpawns.Add((7, 0, 7, 3, IsCompleted(3)));
+        level.PortalSpawns.Add((7, 1, 7, 3, IsCompleted(3)));
         return level;
     }
 
     // Id 3 — "Empurra": caixa no caminho que pode ser empurrada ou contornada.
     private static Level BuildEmpurra()
     {
-        var level = new Level { Id = 3, Name = "Empurra", Width = 9, Height = 1, Depth = 9 };
-        level.PlayerSpawns.Add((4, 0, 7));
-        level.ObjectiveSpawns.Add((6, 0, 1));
-        level.BoxSpawns.Add((4, 0, 4, BoxType.Medium));
-        level.BoxSpawns.Add((2, 0, 5, BoxType.Light));
-        level.BoxSpawns.Add((6, 0, 4, BoxType.Heavy));
-        level.BoxSpawns.Add((6, 0, 3, BoxType.Fragile));
-        level.BoxSpawns.Add((2, 0, 3, BoxType.Permanent));
+        var level = new Level { Id = 3, Name = "Empurra", Width = 9, Height = 4, Depth = 9 };
+        level.FillFloor();
+        level.PlayerSpawns.Add((4, 1, 7));
+        level.ObjectiveSpawns.Add((6, 1, 1));
+        level.BoxSpawns.Add((4, 1, 4, BoxType.Medium));
+        level.BoxSpawns.Add((2, 1, 5, BoxType.Light));
+        level.BoxSpawns.Add((6, 1, 4, BoxType.Heavy));
+        level.BoxSpawns.Add((6, 1, 3, BoxType.Fragile));
+        level.BoxSpawns.Add((2, 1, 3, BoxType.Permanent));
         return level;
     }
 }

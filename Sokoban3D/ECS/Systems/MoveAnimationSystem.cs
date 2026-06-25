@@ -24,7 +24,7 @@ public class MoveAnimationSystem
         var query = new QueryDescription().WithAll<GridPosition, RenderPosition>();
         session.World.Query(in query, (ref GridPosition grid, ref RenderPosition render) =>
         {
-            var target = GridView.ToWorld(session.Grid, grid.X, grid.Z, GridView.PieceY);
+            var target = GridView.ToWorld(session.Grid, grid.X, grid.Y, grid.Z, GridView.PieceRise);
             render.Value = Vector3.Lerp(render.Value, target, t);
 
             // Encaixa quando já está praticamente no lugar, pra não ficar derivando pra sempre.

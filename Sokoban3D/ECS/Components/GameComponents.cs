@@ -76,6 +76,16 @@ public struct LevelPortal
 }
 
 /// <summary>
+/// Marca uma entity como obstáculo: um bloco sólido fixo (voxel 1×1×1) que forma o
+/// terreno. Não é empurrável e ocupa o grid — bloqueia o movimento no seu nível (não
+/// dá pra subir nele) e sustenta o que estiver na célula de cima. Empilhados, criam
+/// paredes e plataformas; onde faltam, a peça cai.
+/// </summary>
+public struct Obstacle
+{
+}
+
+/// <summary>
 /// Marca uma entity como inimigo
 /// </summary>
 public struct Enemy

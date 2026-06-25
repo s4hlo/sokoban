@@ -23,6 +23,12 @@ public class GameWorld
     /// <summary>Identidade do nível, pra rastrear conclusão global. -1 = sem id (default).</summary>
     public int LevelId { get; set; } = -1;
 
+    /// <summary>
+    /// True quando o player caiu até o chão-morte e está congelado: o movimento é
+    /// ignorado até um Z (undo), R (restart) ou T (suspender) tirá-lo desse estado.
+    /// </summary>
+    public bool PlayerFell { get; set; }
+
     public GameWorld(int gridWidth, int gridHeight, int gridDepth)
     {
         World = World.Create();

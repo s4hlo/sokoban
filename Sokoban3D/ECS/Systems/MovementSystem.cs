@@ -29,6 +29,13 @@ public class MovementSystem
         _world = session;
         _history = session.History;
 
+        // Player caído está congelado: ignora o movimento (só Z/R/T tiram dele desse estado).
+        if (session.PlayerFell)
+        {
+            _previous = keyboard;
+            return;
+        }
+
         (int dx, int dz) = GetFreshDirection(keyboard);
         _previous = keyboard;
 
@@ -64,7 +71,59 @@ public class MovementSystem
         _world.Grid.SetOccupied(targetX, pos.Y, targetZ, true);
         _world.World.Set(player, new GridPosition(targetX, pos.Y, targetZ));
 
+        // Gravidade: toda peça que se moveu (player + caixas empurradas) cai até pousar.
+        // A queda faz parte da MESMA ação no histórico — as posições anteriores já estão
+        // gravadas em `record`, então um único Z reverte movimento + queda.
+        ApplyGravity(record);
+
         _history.Push(record);
+
+        // Player que repousou em y==0 está apoiado só pelo chão-morte: caiu, congela.
+        var landed = _world.World.Get<GridPosition>(player);
+        if (landed.Y == 0)
+            _world.PlayerFell = true;
+    }
+
+    /// <summary>
+    /// Aplica gravidade a cada peça que ocupa célula dentre as afetadas pela ação: ela
+    /// desce enquanto a célula logo abaixo estiver vazia, parando ao encontrar obstáculo,
+    /// caixa ou o limite inferior do grid (o chão-morte). Processa de baixo pra cima pra
+    /// que apoios assentem antes do que está sobre eles.
+    /// </summary>
+    private void ApplyGravity(List<EntityState> affected)
+    {
+        var movers = new List<Entity>();
+        foreach (var s in affected)
+            if (Occupies(s.Entity) && !movers.Contains(s.Entity))
+                movers.Add(s.Entity);
+
+        movers.Sort((a, b) =>
+            _world.World.Get<GridPosition>(a).Y.CompareTo(_world.World.Get<GridPosition>(b).Y));
+
+        foreach (var e in movers)
+        {
+            var pos = _world.World.Get<GridPosition>(e);
+            int ny = pos.Y;
+            while (!_world.Grid.IsOccupied(pos.X, ny - 1, pos.Z))
+                ny--;
+
+            if (ny == pos.Y)
+                continue;
+
+            _world.Grid.SetOccupied(pos.X, pos.Y, pos.Z, false);
+            _world.Grid.SetOccupied(pos.X, ny, pos.Z, true);
+            _world.World.Set(e, new GridPosition(pos.X, ny, pos.Z));
+        }
+    }
+
+    /// <summary>Uma peça ocupa célula se for o player ou uma caixa não-quebrada.</summary>
+    private bool Occupies(Entity e)
+    {
+        if (_world.World.Has<Player>(e))
+            return true;
+        if (_world.World.Has<Box>(e))
+            return !_world.World.Get<Box>(e).Broken;
+        return false;
     }
 
     /// <summary>
