@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Arch.Core;
 using Microsoft.Xna.Framework.Input;
 using Sokoban3D.Core;
@@ -7,10 +8,14 @@ namespace Sokoban3D.ECS.Systems;
 
 /// <summary>
 /// Input e movimento do player no plano X/Z. Um passo por tecla pressionada.
-/// Se o player anda contra uma caixa, empurra-a caso a célula seguinte esteja livre.
+/// Ao andar contra uma fila de caixas, empurra todas se a soma dos pesos couber na
+/// força do player e a célula no fim da fila estiver livre.
 /// </summary>
 public class MovementSystem
 {
+    // Força do player: soma máxima de pesos de caixas que ele consegue empurrar de uma vez.
+    private const int PlayerPushStrength = 2;
+
     private readonly GameWorld _world;
     private KeyboardState _previous;
 
@@ -44,35 +49,61 @@ public class MovementSystem
 
         if (_world.Grid.IsOccupied(targetX, pos.Y, targetZ))
         {
-            // Só dá pra avançar se for uma caixa empurrável.
-            if (!TryPushBox(targetX, pos.Y, targetZ, dx, dz))
+            // Só dá pra avançar se a fila de caixas à frente puder ser empurrada.
+            if (!TryPushChain(targetX, pos.Y, targetZ, dx, dz))
                 return;
         }
 
-        // Move o player.
+        // Move o player (a célula alvo já está livre se houve empurrão).
         _world.Grid.SetOccupied(pos.X, pos.Y, pos.Z, false);
         _world.Grid.SetOccupied(targetX, pos.Y, targetZ, true);
         _world.World.Set(player, new GridPosition(targetX, pos.Y, targetZ));
     }
 
     /// <summary>
-    /// Tenta empurrar a caixa em (x,y,z) na direção (dx,dz). Retorna true se empurrou.
+    /// Tenta empurrar a fila de caixas que começa em (x,y,z), na direção (dx,dz).
+    /// Sucesso se a soma dos pesos ≤ força do player e houver célula livre no fim.
     /// </summary>
-    private bool TryPushBox(int x, int y, int z, int dx, int dz)
+    private bool TryPushChain(int x, int y, int z, int dx, int dz)
     {
-        int beyondX = x + dx;
-        int beyondZ = z + dz;
+        var chain = new List<Entity>();
+        int totalWeight = 0;
 
-        if (!_world.Grid.IsValid(beyondX, y, beyondZ) || _world.Grid.IsOccupied(beyondX, y, beyondZ))
-            return false;
+        int cx = x, cz = z;
+        while (true)
+        {
+            if (!_world.Grid.IsValid(cx, y, cz))
+                return false; // a fila esbarra numa parede
 
-        Entity? boxEntity = FindBoxAt(x, y, z);
-        if (boxEntity is null)
-            return false; // ocupado por algo que não é caixa (parede/etc)
+            if (!_world.Grid.IsOccupied(cx, y, cz))
+                break; // achou célula livre: fim da fila
 
-        _world.Grid.SetOccupied(x, y, z, false);
-        _world.Grid.SetOccupied(beyondX, y, beyondZ, true);
-        _world.World.Set(boxEntity.Value, new GridPosition(beyondX, y, beyondZ));
+            Entity? box = FindBoxAt(cx, y, cz);
+            if (box is null)
+                return false; // ocupado por algo que não é caixa
+
+            chain.Add(box.Value);
+            totalWeight += BoxRules.Weight(_world.World.Get<Box>(box.Value).Type);
+
+            cx += dx;
+            cz += dz;
+        }
+
+        if (totalWeight > PlayerPushStrength)
+            return false; // pesado demais
+
+        // Empurra de trás pra frente, pra cada caixa cair numa célula já liberada.
+        for (int i = chain.Count - 1; i >= 0; i--)
+        {
+            var p = _world.World.Get<GridPosition>(chain[i]);
+            int nx = p.X + dx;
+            int nz = p.Z + dz;
+
+            _world.Grid.SetOccupied(p.X, p.Y, p.Z, false);
+            _world.Grid.SetOccupied(nx, p.Y, nz, true);
+            _world.World.Set(chain[i], new GridPosition(nx, p.Y, nz));
+        }
+
         return true;
     }
 

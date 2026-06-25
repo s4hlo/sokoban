@@ -14,7 +14,11 @@ public class RenderSystem
 {
     private static readonly Color FloorColor = new(60, 60, 70);
     private static readonly Color PlayerColor = new(70, 130, 220);
-    private static readonly Color BoxColor = new(160, 110, 60);
+
+    // Cor por tipo de caixa: leve clara, média intermediária, pesada escura.
+    private static readonly Color LightBoxColor = new(210, 180, 140);
+    private static readonly Color MediumBoxColor = new(160, 110, 60);
+    private static readonly Color HeavyBoxColor = new(90, 60, 40);
 
     private readonly GameWorld _world;
     private readonly CubeRenderer _cubes;
@@ -55,9 +59,17 @@ public class RenderSystem
         });
 
         var boxes = new QueryDescription().WithAll<Box, RenderPosition>();
-        _world.World.Query(in boxes, (ref RenderPosition r) =>
+        _world.World.Query(in boxes, (ref Box b, ref RenderPosition r) =>
         {
-            _cubes.Draw(r.Value, pieceScale, BoxColor, view, projection);
+            _cubes.Draw(r.Value, pieceScale, ColorOf(b.Type), view, projection);
         });
     }
+
+    private static Color ColorOf(BoxType type) => type switch
+    {
+        BoxType.Light => LightBoxColor,
+        BoxType.Medium => MediumBoxColor,
+        BoxType.Heavy => HeavyBoxColor,
+        _ => MediumBoxColor,
+    };
 }

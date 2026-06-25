@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Sokoban3D.Core;
+using Sokoban3D.ECS.Components;
 using Sokoban3D.ECS.Systems;
 using Sokoban3D.Levels;
 using Serilog;
@@ -55,9 +56,14 @@ public class Game1 : Game
             Depth = 8
         };
         testLevel.PlayerSpawns.Add((3, 0, 3));
-        testLevel.BoxSpawns.Add((4, 0, 3, 1));
-        testLevel.BoxSpawns.Add((2, 0, 5, 1));
-        testLevel.BoxSpawns.Add((5, 0, 5, 1));
+        // Pesada à direita do player (empurra 1 só).
+        testLevel.BoxSpawns.Add((4, 0, 3, BoxType.Heavy));
+        // Duas médias em fila abaixo do player (empurra as duas de uma vez).
+        testLevel.BoxSpawns.Add((3, 0, 5, BoxType.Medium));
+        testLevel.BoxSpawns.Add((3, 0, 6, BoxType.Medium));
+        // Leves em fila (carregadas de graça, mesmo várias).
+        testLevel.BoxSpawns.Add((5, 0, 5, BoxType.Light));
+        testLevel.BoxSpawns.Add((6, 0, 5, BoxType.Light));
 
         _levelManager.LoadLevel(testLevel);
         Log.Information("Level loaded: {LevelName}", testLevel.Name);

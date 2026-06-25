@@ -17,7 +17,7 @@ public class Level
 
     // Dados: posições de player, caixas, objetivos, inimigos
     public List<(int X, int Y, int Z)> PlayerSpawns = new();
-    public List<(int X, int Y, int Z, int Weight)> BoxSpawns = new();
+    public List<(int X, int Y, int Z, BoxType Type)> BoxSpawns = new();
     public List<(int X, int Y, int Z)> ObjectiveSpawns = new();
     public List<(int X, int Y, int Z)> EnemySpawns = new();
 }
@@ -54,11 +54,11 @@ public class LevelManager
         }
 
         // Spawn boxes
-        foreach (var (x, y, z, weight) in level.BoxSpawns)
+        foreach (var (x, y, z, type) in level.BoxSpawns)
         {
             var entity = _world.World.Create(
                 new GridPosition(x, y, z),
-                new Box { Weight = weight },
+                new Box { Type = type },
                 new RenderPosition(GridView.ToWorld(_world.Grid, x, z, GridView.PieceY))
             );
             _world.Grid.SetOccupied(x, y, z, true);

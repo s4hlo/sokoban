@@ -9,11 +9,36 @@ public struct Player
 }
 
 /// <summary>
-/// Marca uma entity como caixa
+/// Tipos de caixa. O peso determina quanto "esforço" o player gasta pra empurrar.
+/// </summary>
+public enum BoxType
+{
+    Light,  // leve: sem peso, carregada de graça (até por outra caixa)
+    Medium, // média: o player empurra até duas em fila
+    Heavy,  // pesada: só uma por vez
+}
+
+/// <summary>
+/// Marca uma entity como caixa, com seu tipo.
 /// </summary>
 public struct Box
 {
-    public int Weight; // 1 = normal, 2 = pesada, etc
+    public BoxType Type;
+}
+
+/// <summary>
+/// Regras de peso por tipo de caixa. Peso é o custo que o player gasta pra empurrar;
+/// a soma dos pesos numa fila não pode passar da força do player.
+/// </summary>
+public static class BoxRules
+{
+    public static int Weight(BoxType type) => type switch
+    {
+        BoxType.Light => 0,
+        BoxType.Medium => 1,
+        BoxType.Heavy => 2,
+        _ => 1,
+    };
 }
 
 /// <summary>
