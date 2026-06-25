@@ -100,8 +100,10 @@ public class MovementSystem
 
         if (aheadClear)
         {
-            // Empurra a caixa pra frente.
-            record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), box));
+            // Empurra a caixa pra frente. Caixas imunes ao undo movem normalmente,
+            // mas não são registradas — o undo não as reverte (só o R).
+            if (!BoxRules.IgnoresUndo(box.Type))
+                record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), box));
             _world.Grid.SetOccupied(x, y, z, false);
             _world.Grid.SetOccupied(aheadX, y, aheadZ, true);
             _world.World.Set(boxEntity.Value, new GridPosition(aheadX, y, aheadZ));

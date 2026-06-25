@@ -73,6 +73,8 @@ public class Game1 : Game
         testLevel.BoxSpawns.Add((3, 0, 0, BoxType.Fragile));
         // À esquerda do player (A empurra até a borda; lá ela quebra).
         testLevel.BoxSpawns.Add((1, 0, 3, BoxType.Fragile));
+        // Permanente (verde): empurra como pesada; o undo (Z) não a reverte, só o R.
+        testLevel.BoxSpawns.Add((3, 0, 2, BoxType.Permanent));
 
         _levelManager.LoadLevel(testLevel);
         Log.Information("Level loaded: {LevelName}", testLevel.Name);

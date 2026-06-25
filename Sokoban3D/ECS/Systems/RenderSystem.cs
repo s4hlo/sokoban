@@ -20,6 +20,7 @@ public class RenderSystem
     private static readonly Color MediumBoxColor = new(160, 110, 60);
     private static readonly Color HeavyBoxColor = new(90, 60, 40);
     private static readonly Color FragileBoxColor = new(205, 120, 120);
+    private static readonly Color PermanentBoxColor = new(60, 170, 75);
 
     private readonly GameWorld _world;
     private readonly CubeRenderer _cubes;
@@ -75,6 +76,7 @@ public class RenderSystem
         BoxType.Medium => MediumBoxColor,
         BoxType.Heavy => HeavyBoxColor,
         BoxType.Fragile => FragileBoxColor,
+        BoxType.Permanent => PermanentBoxColor,
         _ => MediumBoxColor,
     };
 }

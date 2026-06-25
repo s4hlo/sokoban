@@ -17,6 +17,7 @@ public enum BoxType
     Medium,  // média: o player empurra até duas em fila
     Heavy,   // pesada: só uma por vez
     Fragile, // frágil: empurra como leve, mas quebra se for contra algo que não move
+    Permanent, // verde: empurra como pesada, mas o undo não a reverte (só o R volta ela)
 }
 
 /// <summary>
@@ -42,8 +43,15 @@ public static class BoxRules
         BoxType.Medium => 1,
         BoxType.Heavy => 2,
         BoxType.Fragile => 0,
+        BoxType.Permanent => 2, // mesmo peso da pesada
         _ => 1,
     };
+
+    /// <summary>
+    /// True se a caixa não deve ser registrada no histórico de undo: ela se move
+    /// normalmente, mas o undo não a reverte — só o restart (R) volta à posição inicial.
+    /// </summary>
+    public static bool IgnoresUndo(BoxType type) => type == BoxType.Permanent;
 }
 
 /// <summary>
