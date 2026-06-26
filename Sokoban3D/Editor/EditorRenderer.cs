@@ -1,4 +1,3 @@
-using System.Text;
 using Arch.Core;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -95,26 +94,71 @@ public class EditorRenderer
         _cubes.DrawWireframe(center, new Vector3(1.02f), BrushColor(editor.Brush), view, projection);
     }
 
+    // Cores do HUD por papel: cabeçalho em destaque, texto comum, dicas apagadas, status em verde.
+    private static readonly Color HeaderColor = new(235, 200, 70);
+    private static readonly Color TextColor = new(205, 205, 210);
+    private static readonly Color HintColor = new(140, 140, 150);
+    private static readonly Color StatusColor = new(120, 220, 120);
+
+    // Teclas de brush, cada uma colorida pela própria cor (a ativa fica acesa, as demais apagadas).
+    private static readonly (EditorBrush Brush, string Label)[] BrushKeys =
+    {
+        (EditorBrush.Obstacle, "[1]Obstaculo "),
+        (EditorBrush.Box, "[2]Caixa "),
+        (EditorBrush.Objective, "[3]Meta "),
+        (EditorBrush.Portal, "[4]Portal "),
+        (EditorBrush.Player, "[5]Player "),
+        (EditorBrush.Plate, "[6]Placa "),
+        (EditorBrush.Toggle, "[7]Toggle "),
+        (EditorBrush.Eraser, "[0]Borracha"),
+    };
+
     private void DrawHud(LevelEditor editor)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("== EDITOR ==  (Tab: jogar)");
-        sb.AppendLine($"Cursor ({editor.CursorX},{editor.CursorY},{editor.CursorZ})   " +
-                      $"Grid {editor.Working.Width}x{editor.Working.Height}x{editor.Working.Depth}");
-        sb.AppendLine($"Brush: {BrushLabel(editor)}");
-        sb.AppendLine("Mover: WASD + Q/E    Aplicar: Espaco    Apagar: Del");
-        sb.AppendLine("[1]Obstaculo [2]Caixa [3]Meta [4]Portal [5]Player [6]Placa [7]Toggle [0]Borracha");
-        sb.AppendLine("Caixa: [2] cicla tipo   Portal: [ ] alvo   Placa/Toggle: [ ] grupo   Toggle: [7] inverte repouso");
-        sb.AppendLine("Resize: Shift+WASD/Q/E    Salvar F5   Carregar F9   Novo N");
-        if (!string.IsNullOrEmpty(editor.Status))
-            sb.AppendLine(editor.Status);
+        float x = 10f, y = 10f;
+        float lh = _font.LineSpacing;
 
         _spriteBatch.Begin();
-        var text = sb.ToString();
-        // Sombra simples pra o texto ficar legível sobre qualquer fundo.
-        _spriteBatch.DrawString(_font, text, new Vector2(11, 11), Color.Black * 0.6f);
-        _spriteBatch.DrawString(_font, text, new Vector2(10, 10), Color.White);
+
+        Line(x, ref y, lh, ("== EDITOR ==  ", HeaderColor), ("(Tab: jogar)", HintColor));
+        Line(x, ref y, lh, ($"Cursor ({editor.CursorX},{editor.CursorY},{editor.CursorZ})   " +
+                            $"Grid {editor.Working.Width}x{editor.Working.Height}x{editor.Working.Depth}", TextColor));
+        Line(x, ref y, lh, ("Brush: ", TextColor), (BrushLabel(editor), BrushColor(editor.Brush)));
+        Line(x, ref y, lh, ("Mover: WASD + Q/E    Aplicar: Espaco    Apagar: Del", HintColor));
+        DrawBrushKeys(x, ref y, lh, editor.Brush);
+        Line(x, ref y, lh, ("Caixa: [2] cicla tipo   Portal: [ ] alvo   Placa/Toggle: [ ] grupo   Toggle: [7] inverte repouso", HintColor));
+        Line(x, ref y, lh, ("Resize: Shift+WASD/Q/E    Salvar F5   Carregar F9   Novo N", HintColor));
+        if (!string.IsNullOrEmpty(editor.Status))
+            Line(x, ref y, lh, (editor.Status, StatusColor));
+
         _spriteBatch.End();
+    }
+
+    /// <summary>Desenha uma linha como segmentos coloridos lado a lado (com sombra) e avança o Y.</summary>
+    private void Line(float x, ref float y, float lineHeight, params (string Text, Color Color)[] segments)
+    {
+        float cx = x;
+        foreach (var (text, color) in segments)
+        {
+            _spriteBatch.DrawString(_font, text, new Vector2(cx + 1, y + 1), Color.Black * 0.7f);
+            _spriteBatch.DrawString(_font, text, new Vector2(cx, y), color);
+            cx += _font.MeasureString(text).X;
+        }
+        y += lineHeight;
+    }
+
+    /// <summary>Linha das teclas de brush: cada token na sua cor; a brush ativa acesa, as demais apagadas.</summary>
+    private void DrawBrushKeys(float x, ref float y, float lineHeight, EditorBrush active)
+    {
+        float cx = x;
+        foreach (var (brush, label) in BrushKeys)
+        {
+            var color = brush == active ? Color.White : BrushColor(brush) * 0.5f;
+            _spriteBatch.DrawString(_font, label, new Vector2(cx + 1, y + 1), Color.Black * 0.7f);
+            _spriteBatch.DrawString(_font, label, new Vector2(cx, y), color);
+            cx += _font.MeasureString(label).X;
+        }
+        y += lineHeight;
     }
 
     private static string BrushLabel(LevelEditor editor) => editor.Brush switch
