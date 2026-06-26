@@ -23,6 +23,7 @@ public class EditorRenderer
     private static readonly Color PlayerColor = new(90, 150, 240);
     private static readonly Color PlateColor = new(180, 140, 230);
     private static readonly Color ToggleColor = new(130, 80, 190);
+    private static readonly Color TimelessBaseColor = new(60, 200, 120);
     private static readonly Color EraserColor = new(230, 90, 90);
 
     private readonly GraphicsDevice _device;
@@ -115,6 +116,7 @@ public class EditorRenderer
         (EditorBrush.Player, "[5]Player "),
         (EditorBrush.Plate, "[6]Placa "),
         (EditorBrush.Toggle, "[7]Toggle "),
+        (EditorBrush.TimelessBase, "[8]Base "),
         (EditorBrush.Eraser, "[0]Borracha"),
     };
 
@@ -189,6 +191,7 @@ public class EditorRenderer
         EditorBrush.Portal => $"Portal -> nivel {editor.PortalTarget}",
         EditorBrush.Plate => $"Placa (grupo {editor.Group})",
         EditorBrush.Toggle => $"Toggle (grupo {editor.Group}, {(editor.ToggleSolidByDefault ? "some ao pisar" : "aparece ao pisar")}, precisa {editor.ToggleThreshold} placa(s))",
+        EditorBrush.TimelessBase => "Base atemporal (congela o undo de quem pisa)",
         var b => b.ToString(),
     };
 
@@ -201,6 +204,7 @@ public class EditorRenderer
         EditorBrush.Player => PlayerColor,
         EditorBrush.Plate => PlateColor,
         EditorBrush.Toggle => ToggleColor,
+        EditorBrush.TimelessBase => TimelessBaseColor,
         EditorBrush.Eraser => EraserColor,
         _ => CursorColor,
     };

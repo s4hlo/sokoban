@@ -64,12 +64,34 @@ public struct Solid
 }
 
 /// <summary>
+/// Tag comum da família "marcador de célula": peças que ocupam uma célula lógica mas NÃO
+/// ocupam o grid (o player/caixa pisa em cima) — objetivo, portal, placa de pressão, base
+/// atemporal. Não substitui o componente específico de cada um (que carrega os dados e dá o
+/// comportamento); é o conceito único pra consultar "tem um marcador aqui?" e pra essa família
+/// crescer com novos tipos sem reinventar a categoria.
+/// </summary>
+public struct CellMarker
+{
+}
+
+/// <summary>
 /// Marca uma entity como objetivo: a célula-meta que o player precisa alcançar
 /// para concluir o nível. Não ocupa o grid (o player pode pisar nela).
 /// </summary>
 public struct Objective
 {
     public int Id;
+}
+
+/// <summary>
+/// Base atemporal: marcador de célula (não ocupa o grid) que "congela" o undo de quem está
+/// na sua célula. No momento do Z, qualquer peça (player ou caixa) cuja célula atual tenha uma
+/// base atemporal NÃO é revertida — todo o resto volta; sair da base volta a ser reversível
+/// (decisão dinâmica, tomada na hora do undo). Difere da caixa <see cref="BoxType.Permanent"/>
+/// (verde), que ignora o undo por si só: aqui o efeito é da CÉLULA, adquirido por quem pisa nela.
+/// </summary>
+public struct TimelessBase
+{
 }
 
 /// <summary>

@@ -46,11 +46,24 @@ public class History
 
         var states = _stack.Pop();
 
+        // Decisão tomada AGORA, no começo do undo (antes de qualquer reversão mexer nas
+        // posições): peças que estão sobre uma base atemporal NÃO têm seu próprio movimento
+        // revertido — ficam onde estão. Calcular o conjunto aqui (e não a cada passo) é o que
+        // mantém a decisão estável mesmo que a peça seja empurrada pra fora da base no meio do
+        // undo. Empurrada elas podem ser: a volta de outra peça as desloca (ver TryClearForUndo).
+        var frozen = new HashSet<Entity>();
+        foreach (var s in states)
+            if (OnTimelessBase(world, s.Entity))
+                frozen.Add(s.Entity);
+
         // 1) Restaura a ocupação (presença do Solid) antes da posição, pra que Occupies já
         //    enxergue o estado restaurado (ex.: frágil que volta inteira reocupa o grid).
         //    Mudança estrutural segura: aqui se itera uma List, não uma World.Query.
         foreach (var s in states)
         {
+            if (frozen.Contains(s.Entity))
+                continue;
+
             bool isSolid = world.World.Has<Solid>(s.Entity);
             if (s.WasSolid && !isSolid)
                 // Volta a ocupar o grid fica pro passo 2 (Occupy ao reposicionar).
@@ -68,12 +81,18 @@ public class History
         // 2) Restaura a posição peça-a-peça, de trás pra frente, liberando a célula só
         //    na hora de mover cada peça. Essa ordem (o "empurrador" antes do empurrado)
         //    garante que o alvo já foi desocupado por quem estava atrás — então o grid
-        //    nunca "mente" durante a volta, e o único ocupante possível do alvo é a verde
-        //    (que nunca está no histórico). Nesse caso a peça empurra a verde em cadeia;
-        //    o player conta como leve e também é empurrado. Se não der pra liberar, fica.
+        //    nunca "mente" durante a volta. O ocupante possível do alvo é a verde (nunca no
+        //    histórico) ou uma peça parada sobre uma base atemporal: ambas são empurradas em
+        //    cadeia; o player conta como leve e também é empurrado. Se não der pra liberar, fica.
         for (int i = states.Count - 1; i >= 0; i--)
         {
             var s = states[i];
+
+            // Peça sobre uma base atemporal não volta pro próprio histórico: fica onde está
+            // (mas o passo de empurrão acima ainda pode tê-la deslocado pra fora da base).
+            if (frozen.Contains(s.Entity))
+                continue;
+
             var current = world.World.Get<GridPosition>(s.Entity);
             var target = s.Position;
 
@@ -107,9 +126,11 @@ public class History
 
     /// <summary>
     /// Libera a célula (x,y,z) na direção (dx,dy,dz) durante o undo, empurrando em cadeia
-    /// o que estiver no caminho. São empurráveis a caixa verde (Permanent) e o player (tratado
-    /// como peça leve); caixas normais e inimigos bloqueiam. Nada disso é gravado no histórico —
-    /// é só efeito físico da peça que está voltando. Retorna true se a célula ficou livre.
+    /// o que estiver no caminho. São empurráveis a caixa verde (Permanent) e qualquer peça
+    /// parada sobre uma base atemporal — esta não volta pro próprio histórico, mas pode ser
+    /// deslocada pra fora da base pela volta de outra peça. Caixas normais e inimigos (fora de
+    /// base) bloqueiam. Nada disso é gravado no histórico — é só efeito físico da peça que está
+    /// voltando. Retorna true se a célula ficou livre.
     /// </summary>
     private static bool TryClearForUndo(GameWorld world, int x, int y, int z, int dx, int dy, int dz)
     {
@@ -123,11 +144,11 @@ public class History
             return false; // ocupado por algo sem entidade conhecida: por segurança, bloqueia
 
         Entity e = occupant.Value;
-        // Só a verde é empurrável no undo. O player bloqueia de propósito: empurrá-lo
-        // dessincronizaria a posição dele do próprio histórico de movimentos. Caixa
-        // normal e inimigo também bloqueiam.
-        bool pushable = world.World.Has<Box>(e) && world.World.Get<Box>(e).Type == BoxType.Permanent;
-        if (!pushable)
+        // Empurrável se é a verde, ou se está sobre uma base atemporal (a base não trava o undo:
+        // a peça nela é deslocada pra fora). Fora isso, caixa normal, inimigo e player bloqueiam.
+        bool isPermanent = world.World.Has<Box>(e) && world.World.Get<Box>(e).Type == BoxType.Permanent;
+        bool onBase = world.Spatial.CellWith<TimelessBase>(x, y, z) is not null;
+        if (!isPermanent && !onBase)
             return false;
 
         int ax = x + dx;
@@ -144,4 +165,14 @@ public class History
     /// <summary>Uma peça ocupa célula se tem o tag <see cref="Solid"/>.</summary>
     private static bool Occupies(GameWorld world, Entity entity)
         => world.World.Has<Solid>(entity);
+
+    /// <summary>
+    /// True se a entity está, AGORA, sobre uma base atemporal (marcador na sua célula atual).
+    /// Nesse caso o undo não a reverte — a decisão é dinâmica, tomada no momento do Z.
+    /// </summary>
+    private static bool OnTimelessBase(GameWorld world, Entity entity)
+    {
+        var p = world.World.Get<GridPosition>(entity);
+        return world.Spatial.CellWith<TimelessBase>(p.X, p.Y, p.Z) is not null;
+    }
 }

@@ -28,6 +28,8 @@ public class RenderSystem
     // Placa de pressão (tile plano): clara em repouso, acende quando há peça em cima.
     private static readonly Color PlateColor = new(150, 110, 200);
     private static readonly Color PlatePressedColor = new(210, 170, 255);
+    // Base atemporal (tile plano verde): congela o undo de quem está em cima.
+    private static readonly Color TimelessBaseColor = new(60, 200, 120);
     // Bloco toggle: cubo roxo quando sólido; tile fino (pegada) quando aberto, pra anteceder
     // onde ele vai aparecer.
     private static readonly Color ToggleSolidColor = new(130, 80, 190);
@@ -86,8 +88,9 @@ public class RenderSystem
     }
 
     /// <summary>
-    /// Desenha marcadores que não se movem nem ocupam o grid — objetivos e portais —
-    /// como tiles planos sobre o chão, na célula lógica (sem interpolação).
+    /// Desenha marcadores que não se movem nem ocupam o grid — objetivos, portais, placas de
+    /// pressão e bases atemporais — como tiles planos sobre o chão, na célula lógica (sem
+    /// interpolação).
     /// </summary>
     private void DrawMarkers(Matrix view, Matrix projection)
     {
@@ -116,6 +119,14 @@ public class RenderSystem
             var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
             var color = grid.Occupant(p.X, p.Y, p.Z) is not null ? PlatePressedColor : PlateColor;
             _cubes.Draw(pos, tileScale, color, view, projection);
+        });
+
+        // Bases atemporais: tile verde fixo (congela o undo de quem pisa em cima).
+        var bases = new QueryDescription().WithAll<TimelessBase, GridPosition>();
+        _world.World.Query(in bases, (ref GridPosition p) =>
+        {
+            var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
+            _cubes.Draw(pos, tileScale, TimelessBaseColor, view, projection);
         });
     }
 

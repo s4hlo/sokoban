@@ -200,6 +200,7 @@ public class LevelEditor
         if (Pressed(k, Keys.D5)) SelectBrush(EditorBrush.Player);
         if (Pressed(k, Keys.D6)) SelectBrush(EditorBrush.Plate);
         if (Pressed(k, Keys.D7)) SelectBrush(EditorBrush.Toggle);
+        if (Pressed(k, Keys.D8)) SelectBrush(EditorBrush.TimelessBase);
         if (Pressed(k, Keys.D0)) SelectBrush(EditorBrush.Eraser);
 
         // [ ] editam o item sob o cursor (grupo da placa/toggle, alvo do portal); sem nada
@@ -354,6 +355,10 @@ public class LevelEditor
                 RemoveMarkersAt(x, y, z);
                 _working.PlateSpawns.Add((x, y, z, Group));
                 break;
+            case EditorBrush.TimelessBase:
+                RemoveMarkersAt(x, y, z);
+                _working.TimelessBaseSpawns.Add((x, y, z));
+                break;
             case EditorBrush.Toggle:
                 RemoveSolidsAt(x, y, z);
                 _working.ToggleSpawns.Add((x, y, z, Group, ToggleSolidByDefault, ClampThreshold(Group, ToggleThreshold)));
@@ -384,6 +389,7 @@ public class LevelEditor
         _working.ObjectiveSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.PortalSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.PlateSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
+        _working.TimelessBaseSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
     }
 
     // ----- Redimensionar -----
@@ -435,6 +441,7 @@ public class LevelEditor
         _working.PortalSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.PlateSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.ToggleSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
+        _working.TimelessBaseSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
     }
 
     // ----- Arquivos -----

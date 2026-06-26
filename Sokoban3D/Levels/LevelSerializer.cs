@@ -49,7 +49,8 @@ public static class LevelSerializer
         AppendArray(sb, "Obstacles", Format(l.ObstacleSpawns), last: false);
         AppendArray(sb, "Portals", FormatPortals(l.PortalSpawns), last: false);
         AppendArray(sb, "Plates", FormatPlates(l.PlateSpawns), last: false);
-        AppendArray(sb, "Toggles", FormatToggles(l.ToggleSpawns), last: true);
+        AppendArray(sb, "Toggles", FormatToggles(l.ToggleSpawns), last: false);
+        AppendArray(sb, "Bases", Format(l.TimelessBaseSpawns), last: true);
 
         sb.Append("}\n");
         File.WriteAllText(path, sb.ToString());
@@ -140,6 +141,7 @@ public static class LevelSerializer
         foreach (var p in dto.Portals) level.PortalSpawns.Add((p.X, p.Y, p.Z, p.LevelIndex, p.Completed));
         foreach (var p in dto.Plates) level.PlateSpawns.Add((p.X, p.Y, p.Z, p.Group));
         foreach (var t in dto.Toggles) level.ToggleSpawns.Add((t.X, t.Y, t.Z, t.Group, t.SolidByDefault, t.Threshold <= 0 ? 1 : t.Threshold));
+        foreach (var c in dto.Bases) level.TimelessBaseSpawns.Add((c.X, c.Y, c.Z));
 
         return level;
     }
@@ -159,6 +161,7 @@ public static class LevelSerializer
         public List<PortalCell> Portals { get; set; } = new();
         public List<PlateCell> Plates { get; set; } = new();
         public List<ToggleCell> Toggles { get; set; } = new();
+        public List<Cell> Bases { get; set; } = new();
     }
 
     private record struct Cell(int X, int Y, int Z);

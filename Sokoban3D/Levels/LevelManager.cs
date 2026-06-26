@@ -60,6 +60,9 @@ public class Level
     // Threshold: quantas placas do grupo precisam estar pressionadas pra acionar (1 = OR; total do grupo = AND).
     public List<(int X, int Y, int Z, int Group, bool SolidByDefault, int Threshold)> ToggleSpawns = new();
 
+    // Bases atemporais: marcadores que não ocupam o grid e congelam o undo de quem está em cima.
+    public List<(int X, int Y, int Z)> TimelessBaseSpawns = new();
+
     /// <summary>
     /// Cópia profunda da receita. O editor edita um clone do nível ativo, então o estado de
     /// jogo (caixas já movidas) não interfere no design, e vice-versa.
@@ -81,6 +84,7 @@ public class Level
             PortalSpawns = new(PortalSpawns),
             PlateSpawns = new(PlateSpawns),
             ToggleSpawns = new(ToggleSpawns),
+            TimelessBaseSpawns = new(TimelessBaseSpawns),
         };
     }
 }
@@ -148,7 +152,8 @@ public class LevelManager
         {
             var entity = session.World.Create(
                 new GridPosition(x, y, z),
-                new Objective { Id = objId++ }
+                new Objective { Id = objId++ },
+                new CellMarker()
             );
             // Objetivos não ocupam espaço
         }
@@ -171,7 +176,8 @@ public class LevelManager
         {
             session.World.Create(
                 new GridPosition(x, y, z),
-                new LevelPortal { LevelIndex = levelIndex, Completed = completed }
+                new LevelPortal { LevelIndex = levelIndex, Completed = completed },
+                new CellMarker()
             );
         }
 
@@ -180,7 +186,19 @@ public class LevelManager
         {
             session.World.Create(
                 new GridPosition(x, y, z),
-                new PressurePlate { Group = group }
+                new PressurePlate { Group = group },
+                new CellMarker()
+            );
+        }
+
+        // Spawn bases atemporais. Marcador (não ocupa o grid): a peça pisa em cima e o undo
+        // deixa de revertê-la enquanto ali estiver (ver History.Undo / TimelessBase).
+        foreach (var (x, y, z) in level.TimelessBaseSpawns)
+        {
+            session.World.Create(
+                new GridPosition(x, y, z),
+                new TimelessBase(),
+                new CellMarker()
             );
         }
 

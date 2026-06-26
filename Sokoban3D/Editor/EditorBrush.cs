@@ -13,5 +13,6 @@ public enum EditorBrush
     Player,
     Plate,
     Toggle,
+    TimelessBase,
     Eraser,
 }
