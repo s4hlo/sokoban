@@ -76,7 +76,11 @@ public class Game1 : Game
             // Desfaz a última ação. Se o player estava caído, o undo o traz de volta a uma
             // posição segura — então deixa de estar congelado.
             if (Active.History.Undo(Active))
+            {
                 Active.PlayerFell = false;
+                // Undo é instantâneo: encaixa o visual na hora, sem deslizar de volta.
+                _animationSystem.SnapAll(Active);
+            }
         }
         else if (Pressed(keyboard, Keys.T))
             _navigator.SuspendActive();
