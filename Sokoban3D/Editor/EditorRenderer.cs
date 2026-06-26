@@ -126,7 +126,7 @@ public class EditorRenderer
         Line(x, ref y, lh, ("Brush: ", TextColor), (BrushLabel(editor), BrushColor(editor.Brush)));
         Line(x, ref y, lh, ("Mover: WASD + Q/E    Aplicar: Espaco    Apagar: Del", HintColor));
         DrawBrushKeys(x, ref y, lh, editor.Brush);
-        Line(x, ref y, lh, ("Caixa: [2] cicla tipo   Portal: [ ] alvo   Placa/Toggle: [ ] grupo   Toggle: [7] inverte repouso", HintColor));
+        Line(x, ref y, lh, ("Caixa: [2] cicla tipo   [ ] grupo/alvo sob o cursor (ou do proximo)   Toggle: [7] inverte repouso", HintColor));
         Line(x, ref y, lh, ("Resize: Shift+WASD/Q/E    Salvar F5   Carregar F9   Novo N", HintColor));
         if (!string.IsNullOrEmpty(editor.Status))
             Line(x, ref y, lh, (editor.Status, StatusColor));

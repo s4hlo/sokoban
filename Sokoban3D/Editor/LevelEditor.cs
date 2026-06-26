@@ -143,17 +143,59 @@ public class LevelEditor
         }
         if (Pressed(k, Keys.D0)) Brush = EditorBrush.Eraser;
 
-        // [ ] ajustam o alvo do portal ou o grupo da placa/toggle, conforme a brush ativa.
-        bool grouping = Brush == EditorBrush.Plate || Brush == EditorBrush.Toggle;
-        if (Pressed(k, Keys.OemOpenBrackets))
+        // [ ] editam o item sob o cursor (grupo da placa/toggle, alvo do portal); sem nada
+        // sob o cursor, ajustam o valor do PRÓXIMO a ser colocado.
+        if (Pressed(k, Keys.OemOpenBrackets)) AdjustAtCursor(-1);
+        if (Pressed(k, Keys.OemCloseBrackets)) AdjustAtCursor(+1);
+    }
+
+    /// <summary>
+    /// Muda em <paramref name="delta"/> o número associado ao BRUSH ativo: alvo do portal, ou
+    /// grupo da placa/toggle. Se há um item desse mesmo tipo sob o cursor, edita ELE (e
+    /// re-materializa pra o rótulo atualizar na hora); senão, ajusta o default que valerá no
+    /// próximo a ser colocado. Brushes sem número (obstáculo, caixa, etc.) ignoram o ajuste.
+    /// </summary>
+    private void AdjustAtCursor(int delta)
+    {
+        int x = CursorX, y = CursorY, z = CursorZ;
+
+        switch (Brush)
         {
-            if (grouping) Group = Math.Max(0, Group - 1);
-            else PortalTarget = Math.Max(0, PortalTarget - 1);
-        }
-        if (Pressed(k, Keys.OemCloseBrackets))
-        {
-            if (grouping) Group++;
-            else PortalTarget++;
+            case EditorBrush.Portal:
+                int pi = _working.PortalSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
+                if (pi >= 0)
+                {
+                    var p = _working.PortalSpawns[pi];
+                    p.LevelIndex = Math.Max(0, p.LevelIndex + delta);
+                    _working.PortalSpawns[pi] = p;
+                    Rebuild();
+                }
+                else PortalTarget = Math.Max(0, PortalTarget + delta);
+                break;
+
+            case EditorBrush.Plate:
+                int li = _working.PlateSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
+                if (li >= 0)
+                {
+                    var pl = _working.PlateSpawns[li];
+                    pl.Group = Math.Max(0, pl.Group + delta);
+                    _working.PlateSpawns[li] = pl;
+                    Rebuild();
+                }
+                else Group = Math.Max(0, Group + delta);
+                break;
+
+            case EditorBrush.Toggle:
+                int ti = _working.ToggleSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
+                if (ti >= 0)
+                {
+                    var t = _working.ToggleSpawns[ti];
+                    t.Group = Math.Max(0, t.Group + delta);
+                    _working.ToggleSpawns[ti] = t;
+                    Rebuild();
+                }
+                else Group = Math.Max(0, Group + delta);
+                break;
         }
     }
 
