@@ -37,6 +37,8 @@ public class LevelEditor
     // Grupo que liga placas aos blocos toggle, e o estado de repouso do bloco que será colocado.
     public int Group { get; private set; } = 0;
     public bool ToggleSolidByDefault { get; private set; } = true;
+    // Quantas placas do grupo precisam estar pisadas pra o bloco toggle acionar (1 = OR; total = AND).
+    public int ToggleThreshold { get; private set; } = 1;
     public Level Working => _working;
     public string Status { get; private set; } = "";
 
@@ -148,6 +150,10 @@ public class LevelEditor
         // sob o cursor, ajustam o valor do PRÓXIMO a ser colocado.
         if (Pressed(k, Keys.OemOpenBrackets)) AdjustAtCursor(-1);
         if (Pressed(k, Keys.OemCloseBrackets)) AdjustAtCursor(+1);
+
+        // , . ajustam o threshold do bloco toggle (sob o cursor, ou do próximo a ser colocado).
+        if (Pressed(k, Keys.OemComma)) AdjustThreshold(-1);
+        if (Pressed(k, Keys.OemPeriod)) AdjustThreshold(+1);
     }
 
     /// <summary>
@@ -192,12 +198,43 @@ public class LevelEditor
                 {
                     var t = _working.ToggleSpawns[ti];
                     t.Group = Math.Max(0, t.Group + delta);
+                    // Mudou de grupo: o threshold pode passar do nº de placas do novo grupo.
+                    t.Threshold = ClampThreshold(t.Group, t.Threshold);
                     _working.ToggleSpawns[ti] = t;
                     Rebuild();
                 }
                 else Group = Math.Max(0, Group + delta);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Ajusta o threshold do bloco toggle (quantas placas do grupo aciona) em <paramref name="delta"/>:
+    /// se há um toggle sob o cursor, edita ELE (e re-materializa); senão, ajusta o default do
+    /// próximo a ser colocado. Sempre limitado a [1, nº de placas do grupo].
+    /// </summary>
+    private void AdjustThreshold(int delta)
+    {
+        if (Brush != EditorBrush.Toggle)
+            return;
+
+        int x = CursorX, y = CursorY, z = CursorZ;
+        int ti = _working.ToggleSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
+        if (ti >= 0)
+        {
+            var t = _working.ToggleSpawns[ti];
+            t.Threshold = ClampThreshold(t.Group, t.Threshold + delta);
+            _working.ToggleSpawns[ti] = t;
+            Rebuild();
+        }
+        else ToggleThreshold = ClampThreshold(Group, ToggleThreshold + delta);
+    }
+
+    /// <summary>Limita o threshold a [1, total de placas do grupo] (mínimo 1, mesmo sem placas ainda).</summary>
+    private int ClampThreshold(int group, int value)
+    {
+        int plates = _working.PlateSpawns.Count(pl => pl.Group == group);
+        return Math.Clamp(value, 1, Math.Max(1, plates));
     }
 
     // ----- Colocar / apagar -----
@@ -249,7 +286,7 @@ public class LevelEditor
                 break;
             case EditorBrush.Toggle:
                 RemoveSolidsAt(x, y, z);
-                _working.ToggleSpawns.Add((x, y, z, Group, ToggleSolidByDefault));
+                _working.ToggleSpawns.Add((x, y, z, Group, ToggleSolidByDefault, ClampThreshold(Group, ToggleThreshold)));
                 break;
             case EditorBrush.Eraser:
                 EraseCell(x, y, z);

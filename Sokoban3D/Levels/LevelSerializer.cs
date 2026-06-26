@@ -87,11 +87,11 @@ public static class LevelSerializer
         return list;
     }
 
-    private static List<string> FormatToggles(List<(int X, int Y, int Z, int Group, bool SolidByDefault)> cells)
+    private static List<string> FormatToggles(List<(int X, int Y, int Z, int Group, bool SolidByDefault, int Threshold)> cells)
     {
         var list = new List<string>(cells.Count);
-        foreach (var (x, y, z, g, solid) in cells)
-            list.Add($"[{x}, {y}, {z}, {g}, {(solid ? "true" : "false")}]");
+        foreach (var (x, y, z, g, solid, threshold) in cells)
+            list.Add($"[{x}, {y}, {z}, {g}, {(solid ? "true" : "false")}, {threshold}]");
         return list;
     }
 
@@ -139,7 +139,7 @@ public static class LevelSerializer
         foreach (var c in dto.Obstacles) level.ObstacleSpawns.Add((c.X, c.Y, c.Z));
         foreach (var p in dto.Portals) level.PortalSpawns.Add((p.X, p.Y, p.Z, p.LevelIndex, p.Completed));
         foreach (var p in dto.Plates) level.PlateSpawns.Add((p.X, p.Y, p.Z, p.Group));
-        foreach (var t in dto.Toggles) level.ToggleSpawns.Add((t.X, t.Y, t.Z, t.Group, t.SolidByDefault));
+        foreach (var t in dto.Toggles) level.ToggleSpawns.Add((t.X, t.Y, t.Z, t.Group, t.SolidByDefault, t.Threshold <= 0 ? 1 : t.Threshold));
 
         return level;
     }
@@ -165,7 +165,7 @@ public static class LevelSerializer
     private record struct BoxCell(int X, int Y, int Z, BoxType Type);
     private record struct PortalCell(int X, int Y, int Z, int LevelIndex, bool Completed);
     private record struct PlateCell(int X, int Y, int Z, int Group);
-    private record struct ToggleCell(int X, int Y, int Z, int Group, bool SolidByDefault);
+    private record struct ToggleCell(int X, int Y, int Z, int Group, bool SolidByDefault, int Threshold);
 
     private static void ExpectArray(ref Utf8JsonReader reader)
     {
@@ -251,11 +251,18 @@ public static class LevelSerializer
             reader.Read(); int z = reader.GetInt32();
             reader.Read(); int g = reader.GetInt32();
             reader.Read(); bool solid = reader.GetBoolean();
-            reader.Read(); // EndArray
-            return new ToggleCell(x, y, z, g, solid);
+            // Threshold é opcional (mapas antigos têm 5 elementos): se vier número, lê; senão, default 1.
+            int threshold = 1;
+            reader.Read();
+            if (reader.TokenType == JsonTokenType.Number)
+            {
+                threshold = reader.GetInt32();
+                reader.Read(); // EndArray
+            }
+            return new ToggleCell(x, y, z, g, solid, threshold);
         }
 
         public override void Write(Utf8JsonWriter writer, ToggleCell v, JsonSerializerOptions options)
-            => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, {v.Group}, {(v.SolidByDefault ? "true" : "false")}]");
+            => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, {v.Group}, {(v.SolidByDefault ? "true" : "false")}, {v.Threshold}]");
     }
 }

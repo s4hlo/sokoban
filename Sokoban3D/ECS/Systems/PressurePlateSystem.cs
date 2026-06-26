@@ -8,9 +8,10 @@ namespace Sokoban3D.ECS.Systems;
 /// <summary>
 /// Resolve as placas de pressão: o estado de cada bloco <see cref="Toggle"/> é DERIVADO da
 /// ocupação das placas do seu grupo, nunca armazenado à parte. Uma placa está pressionada
-/// quando há uma peça que ocupa o grid (player/caixa) em cima dela; um grupo está acionado se
-/// QUALQUER placa dele estiver pressionada (lógica OR). Acionado, o bloco inverte seu
-/// <see cref="Toggle.SolidByDefault"/>.
+/// quando há uma peça que ocupa o grid (player/caixa) em cima dela. Cada bloco aciona quando o
+/// número de placas pisadas do seu grupo atinge o seu <see cref="Toggle.Threshold"/> (1 = qualquer
+/// placa, lógica OR; total de placas do grupo = só com TODAS, lógica AND). Acionado, o bloco
+/// inverte seu <see cref="Toggle.SolidByDefault"/>.
 ///
 /// É autoridade única sobre o tag <see cref="Solid"/> dos toggles: ligar/desligar passa por
 /// aqui, gravando o estado anterior no <c>record</c> da ação — assim o undo o reverte pela
@@ -28,7 +29,7 @@ public static class PressurePlateSystem
     /// </summary>
     public static void Resolve(GameWorld session, List<EntityState> record)
     {
-        var pressed = PressedGroups(session);
+        var pressedCount = PressedCounts(session);
 
         // Coleta antes de mutar: Add/Remove de Solid é mudança estrutural, proibida durante a
         // iteração de uma World.Query.
@@ -38,7 +39,10 @@ public static class PressurePlateSystem
         var query = new QueryDescription().WithAll<Toggle, GridPosition>();
         session.World.Query(in query, (Entity e, ref Toggle t, ref GridPosition p) =>
         {
-            bool desiredSolid = t.SolidByDefault ^ pressed.Contains(t.Group);
+            // Aciona quando o nº de placas pisadas do grupo atinge o threshold (0 = 1 = OR).
+            int threshold = t.Threshold <= 0 ? 1 : t.Threshold;
+            bool triggered = pressedCount.GetValueOrDefault(t.Group) >= threshold;
+            bool desiredSolid = t.SolidByDefault ^ triggered;
             bool isSolid = session.World.Has<Solid>(e);
             if (desiredSolid == isSolid)
                 return;
@@ -117,17 +121,17 @@ public static class PressurePlateSystem
         Resolve(session, new List<EntityState>());
     }
 
-    /// <summary>Grupos com pelo menos uma placa pressionada (peça ocupando sua célula).</summary>
-    private static HashSet<int> PressedGroups(GameWorld session)
+    /// <summary>Quantas placas de cada grupo estão pressionadas (peça ocupando sua célula).</summary>
+    private static Dictionary<int, int> PressedCounts(GameWorld session)
     {
-        var pressed = new HashSet<int>();
+        var counts = new Dictionary<int, int>();
         var query = new QueryDescription().WithAll<PressurePlate, GridPosition>();
         session.World.Query(in query, (ref PressurePlate plate, ref GridPosition p) =>
         {
             if (session.Grid.Occupant(p.X, p.Y, p.Z) is not null)
-                pressed.Add(plate.Group);
+                counts[plate.Group] = counts.GetValueOrDefault(plate.Group) + 1;
         });
-        return pressed;
+        return counts;
     }
 
     /// <summary>Pilha contígua de peças que repousa diretamente sobre a célula do bloco aberto.</summary>

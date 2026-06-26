@@ -57,7 +57,8 @@ public class Level
     // Placas de pressão e blocos controláveis. Group liga as placas aos toggles de mesmo número.
     // Não ocupam o grid (placas); os toggles ocupam quando sólidos. SolidByDefault: estado em repouso.
     public List<(int X, int Y, int Z, int Group)> PlateSpawns = new();
-    public List<(int X, int Y, int Z, int Group, bool SolidByDefault)> ToggleSpawns = new();
+    // Threshold: quantas placas do grupo precisam estar pressionadas pra acionar (1 = OR; total do grupo = AND).
+    public List<(int X, int Y, int Z, int Group, bool SolidByDefault, int Threshold)> ToggleSpawns = new();
 
     /// <summary>
     /// Cópia profunda da receita. O editor edita um clone do nível ativo, então o estado de
@@ -185,16 +186,16 @@ public class LevelManager
 
         // Spawn blocos toggle no estado de repouso: sólidos (ocupam o grid, igual a obstáculo)
         // só se SolidByDefault. Não se movem — sem SpawnPosition/RenderPosition.
-        foreach (var (x, y, z, group, solidByDefault) in level.ToggleSpawns)
+        foreach (var (x, y, z, group, solidByDefault, threshold) in level.ToggleSpawns)
         {
             var entity = solidByDefault
                 ? session.World.Create(
                     new GridPosition(x, y, z),
-                    new Toggle { Group = group, SolidByDefault = true },
+                    new Toggle { Group = group, SolidByDefault = true, Threshold = threshold },
                     new Solid())
                 : session.World.Create(
                     new GridPosition(x, y, z),
-                    new Toggle { Group = group, SolidByDefault = false });
+                    new Toggle { Group = group, SolidByDefault = false, Threshold = threshold });
 
             if (solidByDefault)
                 session.Occupy(entity);

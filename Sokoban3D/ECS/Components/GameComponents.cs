@@ -113,11 +113,16 @@ public struct PressurePlate
 /// Quando sólido, ganha o tag <see cref="Solid"/> e ocupa o grid (igual a um obstáculo); quando
 /// aberto, perde o tag e some — exatamente como uma caixa frágil quebrada, então o undo o
 /// reverte pela mesma máquina (<see cref="Core.EntityState.WasSolid"/>).
+///
+/// <see cref="Threshold"/> é quantas placas do grupo precisam estar pressionadas ao mesmo tempo
+/// pra o bloco acionar: 1 = qualquer placa (lógica OR); igual ao total de placas do grupo = só
+/// com TODAS pisadas (lógica AND). O sistema trata 0 como 1 (default).
 /// </summary>
 public struct Toggle
 {
     public int Group;
     public bool SolidByDefault;
+    public int Threshold;
 }
 
 /// <summary>
