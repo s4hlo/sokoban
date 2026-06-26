@@ -64,7 +64,11 @@ public class LevelCatalog
     {
         var level = new Level { Id = 1, Name = "Aquecimento", Width = 7, Height = 4, Depth = 7 };
         level.FillFloor();
-        level.PlayerSpawns.Add((3, 1, 5));
+        // Pilar de 2 de altura no spawn: o player começa EM CIMA do obstáculo (y=2), um
+        // nível acima do chão de marcha (y=1). Ele desce pulando pra fora — a gravidade o
+        // assenta no piso ao pisar numa célula sem apoio logo abaixo.
+        level.ObstacleSpawns.Add((3, 1, 5));
+        level.PlayerSpawns.Add((3, 2, 5));
         level.ObjectiveSpawns.Add((3, 1, 1));
         level.BoxSpawns.Add((1, 1, 3, BoxType.Heavy));
         level.BoxSpawns.Add((5, 1, 3, BoxType.Light));
