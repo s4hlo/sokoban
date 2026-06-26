@@ -52,6 +52,28 @@ public class Level
     // Portais (entradas para níveis filhos): cada um leva ao nível LevelIndex; Completed muda a cor.
     // Qualquer nível pode ter portais — é assim que a árvore se ramifica.
     public List<(int X, int Y, int Z, int LevelIndex, bool Completed)> PortalSpawns = new();
+
+    /// <summary>
+    /// Cópia profunda da receita. O editor edita um clone do nível ativo, então o estado de
+    /// jogo (caixas já movidas) não interfere no design, e vice-versa.
+    /// </summary>
+    public Level Clone()
+    {
+        return new Level
+        {
+            Width = Width,
+            Height = Height,
+            Depth = Depth,
+            Name = Name,
+            Id = Id,
+            PlayerSpawns = new(PlayerSpawns),
+            BoxSpawns = new(BoxSpawns),
+            ObjectiveSpawns = new(ObjectiveSpawns),
+            EnemySpawns = new(EnemySpawns),
+            ObstacleSpawns = new(ObstacleSpawns),
+            PortalSpawns = new(PortalSpawns),
+        };
+    }
 }
 
 /// <summary>

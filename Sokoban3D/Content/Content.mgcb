@@ -13,3 +13,8 @@
 
 #---------------------------------- Content ---------------------------------#
 
+#begin Hud.spritefont
+/importer:FontDescriptionImporter
+/processor:FontDescriptionProcessor
+/build:Hud.spritefont
+

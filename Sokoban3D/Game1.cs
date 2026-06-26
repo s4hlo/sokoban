@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Input;
 using Sokoban3D.Core;
 using Sokoban3D.ECS.Components;
 using Sokoban3D.ECS.Systems;
+using Sokoban3D.Editor;
 using Sokoban3D.Levels;
 using Serilog;
 
@@ -21,6 +22,12 @@ public class Game1 : Game
     private LevelNavigator _navigator;
     private Camera _camera;
     private KeyboardState _previousKeyboard;
+
+    // Editor de níveis: alterna com Tab. Enquanto ativo, os sistemas de jogo ficam pausados.
+    private LevelEditor _editor;
+    private EditorRenderer _editorRenderer;
+    private SpriteFont _hudFont;
+    private bool _editorActive;
 
     // Sessão ativa: o navigator é dono da pilha/cache de níveis; aqui só se referencia o topo.
     private GameWorld Active => _navigator.Active;
@@ -46,6 +53,10 @@ public class Game1 : Game
         _navigator = new LevelNavigator(_levelManager, _catalog);
         _navigator.LevelChanged += ReframeCamera;
 
+        _editor = new LevelEditor(_levelManager);
+        // Redimensionar o grid no editor exige reenquadrar a câmera.
+        _editor.GridChanged += ReframeCamera;
+
         Log.Information("Game initialized");
 
         base.Initialize();
@@ -53,7 +64,11 @@ public class Game1 : Game
 
     protected override void LoadContent()
     {
-        _renderSystem = new RenderSystem(GraphicsDevice);
+        // O CubeRenderer (preso ao device) é compartilhado entre o render do jogo e o do editor.
+        var cubes = new CubeRenderer(GraphicsDevice);
+        _renderSystem = new RenderSystem(cubes);
+        _hudFont = Content.Load<SpriteFont>("Hud");
+        _editorRenderer = new EditorRenderer(GraphicsDevice, cubes, _hudFont);
 
         // Começa na raiz da árvore de níveis (um nível como qualquer outro). O navigator
         // dispara LevelChanged, que reposiciona a câmera.
@@ -66,6 +81,28 @@ public class Game1 : Game
 
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || keyboard.IsKeyDown(Keys.Escape))
             Exit();
+
+        // Tab alterna entre jogar e editar a sessão ativa. Ao entrar, o editor recebe o
+        // teclado atual pra a detecção de borda não disparar uma brush no mesmo frame.
+        bool toggled = Pressed(keyboard, Keys.Tab);
+        if (toggled)
+        {
+            _editorActive = !_editorActive;
+            if (_editorActive)
+                _editor.Enter(Active, keyboard);
+            else
+                _editor.Exit(Active);
+        }
+
+        if (_editorActive)
+        {
+            // No editor os sistemas de jogo ficam pausados; só o editor processa input.
+            if (!toggled)
+                _editor.Update(Active, keyboard);
+            _previousKeyboard = keyboard;
+            base.Update(gameTime);
+            return;
+        }
 
         // Undo/restart funcionam em qualquer nível — cada sessão tem seu próprio histórico.
         // T = suspender: sai pro pai PRESERVANDO este nível (volta exatamente onde parou).
@@ -133,11 +170,18 @@ public class Game1 : Game
     {
         GraphicsDevice.Clear(Color.CornflowerBlue);
         GraphicsDevice.DepthStencilState = DepthStencilState.Default;
+        // O SpriteBatch do HUD do editor deixa o BlendState em AlphaBlend; restaura o opaco
+        // pra cena 3D do próximo frame não herdar transparência.
+        GraphicsDevice.BlendState = BlendState.Opaque;
         // Descarta a face traseira (convenção do MonoGame). O cubo é enrolado pra isso em
         // CubeRenderer.BuildCube, então só as faces externas são desenhadas.
         GraphicsDevice.RasterizerState = RasterizerState.CullCounterClockwise;
 
         _renderSystem.Draw(Active, _camera.View, _camera.Projection);
+
+        // Overlay do editor (cursor + HUD) por cima da cena.
+        if (_editorActive)
+            _editorRenderer.Draw(Active, _editor, _camera.View, _camera.Projection);
 
         base.Draw(gameTime);
     }

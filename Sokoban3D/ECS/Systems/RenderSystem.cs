@@ -32,13 +32,14 @@ public class RenderSystem
     private static readonly Color FragileBoxColor = new(205, 120, 120);
     private static readonly Color PermanentBoxColor = new(60, 170, 75);
 
-    // Sessão ativa do frame. O CubeRenderer (preso ao device) é reutilizado entre sessões.
+    // Sessão ativa do frame. O CubeRenderer (preso ao device) é reutilizado entre sessões
+    // e compartilhado com o editor — por isso vem injetado, não criado aqui.
     private GameWorld _world;
     private readonly CubeRenderer _cubes;
 
-    public RenderSystem(GraphicsDevice device)
+    public RenderSystem(CubeRenderer cubes)
     {
-        _cubes = new CubeRenderer(device);
+        _cubes = cubes;
     }
 
     public void Draw(GameWorld session, Matrix view, Matrix projection)

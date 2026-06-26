@@ -15,6 +15,12 @@ public class CubeRenderer
     private readonly IndexBuffer _indices;
     private readonly int _primitiveCount;
 
+    // Cubo de arestas (wireframe) pro cursor do editor: 8 cantos, 12 linhas. Efeito sem
+    // iluminação pra a cor sair chapada (mais legível que um cubo sombreado).
+    private readonly BasicEffect _wireEffect;
+    private readonly VertexBuffer _wireVertices;
+    private readonly IndexBuffer _wireIndices;
+
     public CubeRenderer(GraphicsDevice device)
     {
         _device = device;
@@ -35,6 +41,19 @@ public class CubeRenderer
 
         _indices = new IndexBuffer(device, IndexElementSize.SixteenBits, inds.Length, BufferUsage.WriteOnly);
         _indices.SetData(inds);
+
+        _wireEffect = new BasicEffect(device)
+        {
+            LightingEnabled = false,
+            TextureEnabled = false,
+            VertexColorEnabled = false,
+        };
+
+        var (wverts, winds) = BuildWireCube();
+        _wireVertices = new VertexBuffer(device, typeof(VertexPosition), wverts.Length, BufferUsage.WriteOnly);
+        _wireVertices.SetData(wverts);
+        _wireIndices = new IndexBuffer(device, IndexElementSize.SixteenBits, winds.Length, BufferUsage.WriteOnly);
+        _wireIndices.SetData(winds);
     }
 
     /// <summary>
@@ -55,6 +74,49 @@ public class CubeRenderer
             pass.Apply();
             _device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, _primitiveCount);
         }
+    }
+
+    /// <summary>
+    /// Desenha apenas as arestas de um cubo (wireframe) na posição/escala dadas. Usado como
+    /// cursor do editor. O chamador controla o estado de profundidade (o editor o desenha por
+    /// cima da geometria pra ficar sempre visível).
+    /// </summary>
+    public void DrawWireframe(Vector3 position, Vector3 scale, Color color, Matrix view, Matrix projection)
+    {
+        _wireEffect.World = Matrix.CreateScale(scale) * Matrix.CreateTranslation(position);
+        _wireEffect.View = view;
+        _wireEffect.Projection = projection;
+        _wireEffect.DiffuseColor = color.ToVector3();
+
+        _device.SetVertexBuffer(_wireVertices);
+        _device.Indices = _wireIndices;
+
+        foreach (var pass in _wireEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _device.DrawIndexedPrimitives(PrimitiveType.LineList, 0, 0, 12);
+        }
+    }
+
+    /// <summary>Os 8 cantos de um cubo unitário e as 12 arestas (índices de linha).</summary>
+    private static (VertexPosition[] verts, short[] inds) BuildWireCube()
+    {
+        var verts = new VertexPosition[8];
+        int i = 0;
+        for (int y = 0; y <= 1; y++)
+            for (int z = 0; z <= 1; z++)
+                for (int x = 0; x <= 1; x++)
+                    verts[i++] = new VertexPosition(new Vector3(x - 0.5f, y - 0.5f, z - 0.5f));
+
+        // Índice de canto: bit0=x, bit1=z, bit2=y. Arestas = pares que diferem em 1 bit.
+        short[] inds =
+        {
+            0, 1, 1, 3, 3, 2, 2, 0, // base (y=0)
+            4, 5, 5, 7, 7, 6, 6, 4, // topo (y=1)
+            0, 4, 1, 5, 2, 6, 3, 7, // verticais
+        };
+
+        return (verts, inds);
     }
 
     /// <summary>
