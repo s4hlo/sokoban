@@ -33,4 +33,15 @@ public static class GridView
         float wz = gz - (grid.Depth - 1) / 2f;
         return new Vector3(wx, gy + rise, wz);
     }
+
+    /// <summary>
+    /// Inverso de <see cref="ToWorld"/> no plano X/Z: dado um ponto de mundo, devolve a célula
+    /// (fracionária) de grid correspondente. Arredondar o resultado dá a célula sob o ponto.
+    /// </summary>
+    public static (float X, float Z) ToGridXZ(GridManager grid, float worldX, float worldZ)
+    {
+        float gx = worldX + (grid.Width - 1) / 2f;
+        float gz = worldZ + (grid.Depth - 1) / 2f;
+        return (gx, gz);
+    }
 }

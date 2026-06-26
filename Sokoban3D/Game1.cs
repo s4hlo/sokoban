@@ -84,18 +84,19 @@ public class Game1 : Game
     protected override void Update(GameTime gameTime)
     {
         var keyboard = Keyboard.GetState();
+        var mouse = Mouse.GetState();
 
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || keyboard.IsKeyDown(Keys.Escape))
             Exit();
 
-        // Tab alterna entre jogar e editar a sessão ativa. Ao entrar, o editor recebe o
-        // teclado atual pra a detecção de borda não disparar uma brush no mesmo frame.
+        // Tab alterna entre jogar e editar a sessão ativa. Ao entrar, o editor recebe o teclado
+        // e o mouse atuais pra a detecção de borda não disparar uma brush no mesmo frame.
         bool toggled = Pressed(keyboard, Keys.Tab);
         if (toggled)
         {
             _editorActive = !_editorActive;
             if (_editorActive)
-                _editor.Enter(Active, keyboard);
+                _editor.Enter(Active, keyboard, mouse);
             else
                 _editor.Exit(Active);
         }
@@ -104,7 +105,15 @@ public class Game1 : Game
         {
             // No editor os sistemas de jogo ficam pausados; só o editor processa input.
             if (!toggled)
-                _editor.Update(Active, keyboard);
+            {
+                // Célula sob o ponteiro na camada Y atual do cursor (null fora do grid) e botão
+                // de brush do HUD sob o ponteiro (null se não estiver sobre nenhum).
+                var picked = MousePicker.PickCell(
+                    GraphicsDevice.Viewport, _camera.View, _camera.Projection,
+                    mouse.X, mouse.Y, Active.Grid, _editor.CursorY);
+                var brushButton = _editorRenderer.HitTestBrush(mouse.X, mouse.Y);
+                _editor.Update(Active, keyboard, mouse, picked, brushButton);
+            }
             _previousKeyboard = keyboard;
             base.Update(gameTime);
             return;

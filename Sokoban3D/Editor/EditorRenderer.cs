@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Arch.Core;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -28,6 +29,10 @@ public class EditorRenderer
     private readonly CubeRenderer _cubes;
     private readonly SpriteBatch _spriteBatch;
     private readonly SpriteFont _font;
+
+    // Caixas de clique dos botões de brush no HUD, preenchidas a cada DrawBrushKeys: assim o
+    // hit-test (HitTestBrush) bate exatamente no que está desenhado, sem duplicar o layout.
+    private readonly List<(EditorBrush Brush, Rectangle Rect)> _brushHitboxes = new();
 
     public EditorRenderer(GraphicsDevice device, CubeRenderer cubes, SpriteFont font)
     {
@@ -125,6 +130,7 @@ public class EditorRenderer
                             $"Grid {editor.Working.Width}x{editor.Working.Height}x{editor.Working.Depth}", TextColor));
         Line(x, ref y, lh, ("Brush: ", TextColor), (BrushLabel(editor), BrushColor(editor.Brush)));
         Line(x, ref y, lh, ("Mover: WASD + Q/E    Aplicar: Espaco    Apagar: Del", HintColor));
+        Line(x, ref y, lh, ("Mouse: clique posiciona / repete aplica   Segurar+arrastar pinta   Botao dir: apaga   (camada Y: Q/E)", HintColor));
         DrawBrushKeys(x, ref y, lh, editor.Brush);
         Line(x, ref y, lh, ("Caixa: [2] cicla tipo   [ ] grupo/alvo sob o cursor (ou do proximo)   Toggle: [7] inverte repouso   , . placas p/ acionar", HintColor));
         Line(x, ref y, lh, ("Resize: Shift+WASD/Q/E    Salvar F5   Carregar F9   Novo N", HintColor));
@@ -150,15 +156,31 @@ public class EditorRenderer
     /// <summary>Linha das teclas de brush: cada token na sua cor; a brush ativa acesa, as demais apagadas.</summary>
     private void DrawBrushKeys(float x, ref float y, float lineHeight, EditorBrush active)
     {
+        _brushHitboxes.Clear();
         float cx = x;
         foreach (var (brush, label) in BrushKeys)
         {
+            float w = _font.MeasureString(label).X;
             var color = brush == active ? Color.White : BrushColor(brush) * 0.5f;
             _spriteBatch.DrawString(_font, label, new Vector2(cx + 1, y + 1), Color.Black * 0.7f);
             _spriteBatch.DrawString(_font, label, new Vector2(cx, y), color);
-            cx += _font.MeasureString(label).X;
+            _brushHitboxes.Add((brush, new Rectangle((int)cx, (int)y, (int)w, (int)lineHeight)));
+            cx += w;
         }
         y += lineHeight;
+    }
+
+    /// <summary>
+    /// Brush cujo rótulo no HUD está sob o ponto de tela (<paramref name="x"/>,<paramref name="y"/>),
+    /// ou null se nenhum. As caixas são as desenhadas no último frame, então o clique acerta o
+    /// botão visível.
+    /// </summary>
+    public EditorBrush? HitTestBrush(int x, int y)
+    {
+        foreach (var (brush, rect) in _brushHitboxes)
+            if (rect.Contains(x, y))
+                return brush;
+        return null;
     }
 
     private static string BrushLabel(LevelEditor editor) => editor.Brush switch

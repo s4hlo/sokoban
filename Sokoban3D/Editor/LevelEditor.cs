@@ -26,6 +26,7 @@ public class LevelEditor
     private Level _working;
     private GameWorld _session;
     private KeyboardState _prev;
+    private MouseState _prevMouse;
 
     // ----- Estado exposto pro renderer -----
     public int CursorX { get; private set; }
@@ -56,11 +57,12 @@ public class LevelEditor
     /// (o editor mostra o design, não o estado de jogo). Recebe o teclado atual pra a detecção
     /// de borda não disparar a brush no mesmo frame do Tab.
     /// </summary>
-    public void Enter(GameWorld session, KeyboardState keyboard)
+    public void Enter(GameWorld session, KeyboardState keyboard, MouseState mouse)
     {
         _session = session;
         _working = session.CurrentLevel?.Clone() ?? BlankLevel(-1);
         _prev = keyboard;
+        _prevMouse = mouse;
 
         CursorX = _working.Width / 2;
         CursorZ = _working.Depth / 2;
@@ -83,7 +85,7 @@ public class LevelEditor
         _session = null;
     }
 
-    public void Update(GameWorld session, KeyboardState keyboard)
+    public void Update(GameWorld session, KeyboardState keyboard, MouseState mouse, (int X, int Z)? pickedCell, EditorBrush? brushButton)
     {
         _session = session;
         bool shift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
@@ -95,10 +97,76 @@ public class LevelEditor
 
         HandleBrushSelection(keyboard);
         HandlePlacement(keyboard);
+        HandleMouse(mouse, pickedCell, brushButton);
         HandleFiles(keyboard);
 
         _prev = keyboard;
+        _prevMouse = mouse;
     }
+
+    // ----- Mouse -----
+
+    /// <summary>
+    /// Clique sobre a célula <paramref name="pickedCell"/> (na camada Y atual, calculada pelo
+    /// <see cref="Core.MousePicker"/>): o esquerdo move o cursor pra ela e, se já estava lá,
+    /// aplica a brush; o direito move o cursor e apaga. Clique fora do grid (cell null) é ignorado.
+    /// </summary>
+    private void HandleMouse(MouseState mouse, (int X, int Z)? pickedCell, EditorBrush? brushButton)
+    {
+        // Clique sobre um botão de brush do HUD troca a brush e consome o clique (não toca no grid).
+        if (brushButton is { } btn)
+        {
+            if (LeftPressed(mouse))
+                SelectBrush(btn);
+            return;
+        }
+
+        if (pickedCell is not { } cell)
+            return;
+
+        bool movedToNewCell = cell.X != CursorX || cell.Z != CursorZ;
+        bool leftDown = mouse.LeftButton == ButtonState.Pressed;
+        bool rightDown = mouse.RightButton == ButtonState.Pressed;
+
+        if (LeftPressed(mouse))
+        {
+            // Primeiro clique numa célula nova só posiciona o cursor; clicar de novo na célula
+            // onde ele já está confirma e aplica a brush.
+            MoveCursorTo(cell);
+            if (!movedToNewCell)
+            {
+                Apply();
+                Rebuild();
+            }
+        }
+        else if (leftDown && movedToNewCell)
+        {
+            // Botão esquerdo segurado e arrastando pra uma célula nova: pinta enquanto move.
+            MoveCursorTo(cell);
+            Apply();
+            Rebuild();
+        }
+        else if (RightPressed(mouse) || (rightDown && movedToNewCell))
+        {
+            // Direito (clique ou arrasto) apaga a célula sob o ponteiro.
+            MoveCursorTo(cell);
+            EraseCell(CursorX, CursorY, CursorZ);
+            Rebuild();
+        }
+    }
+
+    private void MoveCursorTo((int X, int Z) cell)
+    {
+        CursorX = cell.X;
+        CursorZ = cell.Z;
+        ClampCursor();
+    }
+
+    private bool LeftPressed(MouseState m)
+        => m.LeftButton == ButtonState.Pressed && _prevMouse.LeftButton == ButtonState.Released;
+
+    private bool RightPressed(MouseState m)
+        => m.RightButton == ButtonState.Pressed && _prevMouse.RightButton == ButtonState.Released;
 
     // ----- Cursor -----
 
@@ -125,26 +193,14 @@ public class LevelEditor
 
     private void HandleBrushSelection(KeyboardState k)
     {
-        if (Pressed(k, Keys.D1)) Brush = EditorBrush.Obstacle;
-        if (Pressed(k, Keys.D2))
-        {
-            // Repetir a tecla da caixa cicla o tipo; a primeira só seleciona a brush.
-            if (Brush == EditorBrush.Box)
-                BoxType = (BoxType)(((int)BoxType + 1) % Enum.GetValues<BoxType>().Length);
-            Brush = EditorBrush.Box;
-        }
-        if (Pressed(k, Keys.D3)) Brush = EditorBrush.Objective;
-        if (Pressed(k, Keys.D4)) Brush = EditorBrush.Portal;
-        if (Pressed(k, Keys.D5)) Brush = EditorBrush.Player;
-        if (Pressed(k, Keys.D6)) Brush = EditorBrush.Plate;
-        if (Pressed(k, Keys.D7))
-        {
-            // Repetir a tecla do toggle alterna o estado de repouso (some-ao-pisar / aparece-ao-pisar).
-            if (Brush == EditorBrush.Toggle)
-                ToggleSolidByDefault = !ToggleSolidByDefault;
-            Brush = EditorBrush.Toggle;
-        }
-        if (Pressed(k, Keys.D0)) Brush = EditorBrush.Eraser;
+        if (Pressed(k, Keys.D1)) SelectBrush(EditorBrush.Obstacle);
+        if (Pressed(k, Keys.D2)) SelectBrush(EditorBrush.Box);
+        if (Pressed(k, Keys.D3)) SelectBrush(EditorBrush.Objective);
+        if (Pressed(k, Keys.D4)) SelectBrush(EditorBrush.Portal);
+        if (Pressed(k, Keys.D5)) SelectBrush(EditorBrush.Player);
+        if (Pressed(k, Keys.D6)) SelectBrush(EditorBrush.Plate);
+        if (Pressed(k, Keys.D7)) SelectBrush(EditorBrush.Toggle);
+        if (Pressed(k, Keys.D0)) SelectBrush(EditorBrush.Eraser);
 
         // [ ] editam o item sob o cursor (grupo da placa/toggle, alvo do portal); sem nada
         // sob o cursor, ajustam o valor do PRÓXIMO a ser colocado.
@@ -154,6 +210,20 @@ public class LevelEditor
         // , . ajustam o threshold do bloco toggle (sob o cursor, ou do próximo a ser colocado).
         if (Pressed(k, Keys.OemComma)) AdjustThreshold(-1);
         if (Pressed(k, Keys.OemPeriod)) AdjustThreshold(+1);
+    }
+
+    /// <summary>
+    /// Seleciona a brush ativa. Reselecionar a Caixa cicla o tipo e reselecionar o Toggle inverte
+    /// o estado de repouso — mesmo comportamento das teclas [2]/[7], compartilhado com o clique
+    /// nos botões do HUD.
+    /// </summary>
+    private void SelectBrush(EditorBrush brush)
+    {
+        if (brush == EditorBrush.Box && Brush == EditorBrush.Box)
+            BoxType = (BoxType)(((int)BoxType + 1) % Enum.GetValues<BoxType>().Length);
+        else if (brush == EditorBrush.Toggle && Brush == EditorBrush.Toggle)
+            ToggleSolidByDefault = !ToggleSolidByDefault;
+        Brush = brush;
     }
 
     /// <summary>
