@@ -77,12 +77,12 @@ public class LevelManager
         // RenderPosition — o render os desenha direto da célula lógica.
         foreach (var (x, y, z) in level.ObstacleSpawns)
         {
-            session.World.Create(
+            var entity = session.World.Create(
                 new GridPosition(x, y, z),
                 new Obstacle(),
                 new Solid()
             );
-            session.Grid.SetOccupied(x, y, z, true);
+            session.Occupy(entity);
         }
 
         // Spawn player
@@ -95,7 +95,7 @@ public class LevelManager
                 new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise)),
                 new Solid()
             );
-            session.Grid.SetOccupied(x, y, z, true);
+            session.Occupy(entity);
         }
 
         // Spawn boxes
@@ -108,7 +108,7 @@ public class LevelManager
                 new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise)),
                 new Solid()
             );
-            session.Grid.SetOccupied(x, y, z, true);
+            session.Occupy(entity);
         }
 
         // Spawn objectives
@@ -131,7 +131,7 @@ public class LevelManager
                 new SpawnPosition(x, y, z),
                 new Solid()
             );
-            session.Grid.SetOccupied(x, y, z, true);
+            session.Occupy(entity);
         }
 
         // Spawn portais (entradas para níveis filhos; qualquer nível pode ter). Não ocupam
@@ -181,8 +181,8 @@ public class LevelManager
         // Obstáculos não têm SpawnPosition (não se movem), então o Clear acima apagaria a
         // ocupação deles. Remarca o terreno antes de repor as peças.
         var obstacles = new QueryDescription().WithAll<Obstacle, GridPosition>();
-        session.World.Query(in obstacles, (ref GridPosition pos) =>
-            session.Grid.SetOccupied(pos.X, pos.Y, pos.Z, true));
+        session.World.Query(in obstacles, (Entity e, ref GridPosition pos) =>
+            session.Grid.Place(pos.X, pos.Y, pos.Z, e));
 
         // Caixas que tinham quebrado precisam reocupar o grid (readicionar Solid). Como Add é
         // mudança estrutural — proibida durante a iteração de uma query —, coleta-se aqui e
@@ -195,7 +195,7 @@ public class LevelManager
             if (!session.World.Has<Solid>(e))
                 toResolidify.Add(e);
 
-            session.Grid.SetOccupied(spawn.X, spawn.Y, spawn.Z, true);
+            session.Grid.Place(spawn.X, spawn.Y, spawn.Z, e);
         });
 
         foreach (var e in toResolidify)

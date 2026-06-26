@@ -19,22 +19,6 @@ public sealed class SpatialQuery
     }
 
     /// <summary>
-    /// A peça que ocupa a célula (x,y,z), ou null se está livre. "Ocupa" = tem o tag
-    /// <see cref="Solid"/> (player, caixa não-quebrada, inimigo ou obstáculo).
-    /// </summary>
-    public Entity? Occupant(int x, int y, int z)
-    {
-        Entity? found = null;
-        var query = new QueryDescription().WithAll<Solid, GridPosition>();
-        _world.Query(in query, (Entity e, ref GridPosition p) =>
-        {
-            if (p.X == x && p.Y == y && p.Z == z)
-                found = e;
-        });
-        return found;
-    }
-
-    /// <summary>
     /// A entity com o tag <typeparamref name="T"/> na célula (x,y,z), ou null. Para peças
     /// que não ocupam o grid (objetivo, portal) e por isso não saem em <see cref="Occupant"/>.
     /// </summary>

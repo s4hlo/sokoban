@@ -70,9 +70,7 @@ public class MovementSystem
         }
 
         record.Add(new EntityState(player, pos, _world.World.Has<Solid>(player)));
-        _world.Grid.SetOccupied(pos.X, pos.Y, pos.Z, false);
-        _world.Grid.SetOccupied(targetX, pos.Y, targetZ, true);
-        _world.World.Set(player, new GridPosition(targetX, pos.Y, targetZ));
+        _world.Move(player, new GridPosition(targetX, pos.Y, targetZ));
 
         // Gravidade: toda peça que se moveu (player + caixas empurradas) cai até pousar.
         // A queda faz parte da MESMA ação no histórico — as posições anteriores já estão
@@ -113,9 +111,7 @@ public class MovementSystem
             if (ny == pos.Y)
                 continue;
 
-            _world.Grid.SetOccupied(pos.X, pos.Y, pos.Z, false);
-            _world.Grid.SetOccupied(pos.X, ny, pos.Z, true);
-            _world.World.Set(e, new GridPosition(pos.X, ny, pos.Z));
+            _world.Move(e, new GridPosition(pos.X, ny, pos.Z));
         }
     }
 
@@ -132,7 +128,7 @@ public class MovementSystem
         if (!_world.Grid.IsOccupied(x, y, z))
             return true; // já está livre
 
-        Entity? occupant = _world.Spatial.Occupant(x, y, z);
+        Entity? occupant = _world.Grid.Occupant(x, y, z);
         if (occupant is null || !_world.World.Has<Box>(occupant.Value))
             return false; // ocupado por algo que não é caixa (player, inimigo, obstáculo)
         Entity? boxEntity = occupant;
@@ -157,9 +153,7 @@ public class MovementSystem
             // mas não são registradas — o undo não as reverte (só o R).
             if (!BoxRules.IgnoresUndo(box.Type))
                 record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), true));
-            _world.Grid.SetOccupied(x, y, z, false);
-            _world.Grid.SetOccupied(aheadX, y, aheadZ, true);
-            _world.World.Set(boxEntity.Value, new GridPosition(aheadX, y, aheadZ));
+            _world.Move(boxEntity.Value, new GridPosition(aheadX, y, aheadZ));
             return true;
         }
 
@@ -180,8 +174,7 @@ public class MovementSystem
     /// </summary>
     private void BreakBox(Entity entity)
     {
-        var p = _world.World.Get<GridPosition>(entity);
-        _world.Grid.SetOccupied(p.X, p.Y, p.Z, false);
+        _world.Vacate(entity);
         _world.World.Remove<Solid>(entity);
     }
 

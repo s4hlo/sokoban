@@ -78,7 +78,7 @@ public class History
             }
 
             // Libera a célula atual antes de tentar a volta (a peça vai sair dela).
-            world.Grid.SetOccupied(current.X, current.Y, current.Z, false);
+            world.Vacate(s.Entity);
 
             int dx = target.X - current.X;
             int dy = target.Y - current.Y;
@@ -87,12 +87,12 @@ public class History
             if (!TryClearForUndo(world, target.X, target.Y, target.Z, dx, dy, dz))
             {
                 // Não deu pra liberar o alvo: a peça fica onde estava.
-                world.Grid.SetOccupied(current.X, current.Y, current.Z, true);
+                world.Occupy(s.Entity);
                 continue;
             }
 
             world.World.Set(s.Entity, target);
-            world.Grid.SetOccupied(target.X, target.Y, target.Z, true);
+            world.Occupy(s.Entity);
         }
 
         return true;
@@ -111,7 +111,7 @@ public class History
         if (!world.Grid.IsOccupied(x, y, z))
             return true; // já livre
 
-        Entity? occupant = world.Spatial.Occupant(x, y, z);
+        Entity? occupant = world.Grid.Occupant(x, y, z);
         if (occupant is null)
             return false; // ocupado por algo sem entidade conhecida: por segurança, bloqueia
 
@@ -130,9 +130,7 @@ public class History
         if (!TryClearForUndo(world, ax, ay, az, dx, dy, dz))
             return false;
 
-        world.Grid.SetOccupied(x, y, z, false);
-        world.Grid.SetOccupied(ax, ay, az, true);
-        world.World.Set(e, new GridPosition(ax, ay, az));
+        world.Move(e, new GridPosition(ax, ay, az));
         return true;
     }
 

@@ -1,4 +1,5 @@
 using Arch.Core;
+using Sokoban3D.ECS.Components;
 using Sokoban3D.Grid;
 using Sokoban3D.Levels;
 
@@ -38,6 +39,41 @@ public class GameWorld
         Grid = new GridManager(gridWidth, gridHeight, gridDepth);
         History = new History();
         Spatial = new SpatialQuery(World);
+    }
+
+    // ----- Mutação espacial (única fonte da invariante grid + GridPosition) -----
+
+    /// <summary>
+    /// Move a entity para a célula <paramref name="to"/>: libera a célula atual, atualiza a
+    /// <see cref="GridPosition"/> e ocupa a nova. É a única forma de mover algo mantendo grid
+    /// e componente em sincronia. Assume jogada legal — o chamador já validou.
+    /// </summary>
+    public void Move(Entity e, GridPosition to)
+    {
+        var from = World.Get<GridPosition>(e);
+        Grid.Vacate(from.X, from.Y, from.Z);
+        World.Set(e, to);
+        Grid.Place(to.X, to.Y, to.Z, e);
+    }
+
+    /// <summary>
+    /// Ocupa no grid a célula atual da entity (sua <see cref="GridPosition"/>). Usado no spawn
+    /// e ao re-solidificar uma peça (undo de uma frágil quebrada; restart).
+    /// </summary>
+    public void Occupy(Entity e)
+    {
+        var p = World.Get<GridPosition>(e);
+        Grid.Place(p.X, p.Y, p.Z, e);
+    }
+
+    /// <summary>
+    /// Libera no grid a célula atual da entity, sem movê-la. Usado ao quebrar uma frágil
+    /// (a entity persiste, mas deixa de ocupar o grid).
+    /// </summary>
+    public void Vacate(Entity e)
+    {
+        var p = World.Get<GridPosition>(e);
+        Grid.Vacate(p.X, p.Y, p.Z);
     }
 
     public void Dispose()
