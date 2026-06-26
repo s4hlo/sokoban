@@ -15,6 +15,7 @@ public class Game1 : Game
 {
     private GraphicsDeviceManager _graphics;
     private LevelManager _levelManager;
+    private LevelRepository _levelRepo;
     private LevelCatalog _catalog;
     private MovementSystem _movementSystem;
     private MoveAnimationSystem _animationSystem;
@@ -47,13 +48,14 @@ public class Game1 : Game
     protected override void Initialize()
     {
         _levelManager = new LevelManager();
-        _catalog = new LevelCatalog();
+        _levelRepo = new LevelRepository();
+        _catalog = new LevelCatalog(_levelRepo);
         _movementSystem = new MovementSystem();
         _animationSystem = new MoveAnimationSystem();
         _navigator = new LevelNavigator(_levelManager, _catalog);
         _navigator.LevelChanged += ReframeCamera;
 
-        _editor = new LevelEditor(_levelManager);
+        _editor = new LevelEditor(_levelManager, _levelRepo);
         // Redimensionar o grid no editor exige reenquadrar a câmera.
         _editor.GridChanged += ReframeCamera;
 

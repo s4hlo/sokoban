@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sokoban3D.ECS.Components;
@@ -7,52 +9,96 @@ using Sokoban3D.ECS.Components;
 namespace Sokoban3D.Levels;
 
 /// <summary>
-/// Salva e carrega um <see cref="Level"/> como JSON legível. Usa um DTO dedicado (em vez de
-/// serializar os ValueTuples direto) pra o arquivo ficar com nomes claros e estável a mudanças
-/// internas das listas de spawn.
+/// Salva e carrega um <see cref="Level"/> como JSON legível. A leitura usa System.Text.Json
+/// com um DTO dedicado; a escrita é feita à mão pra deixar o arquivo bonito: cada célula numa
+/// linha só (<c>[x, y, z]</c> pra marcadores/obstáculos, <c>[x, y, z, "Tipo"]</c> pra caixas,
+/// <c>[x, y, z, alvo, concluido]</c> pra portais).
 /// </summary>
 public static class LevelSerializer
 {
-    private static readonly JsonSerializerOptions Options = new()
+    private static readonly JsonSerializerOptions ReadOptions = new()
     {
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() },
+        Converters =
+        {
+            new CellConverter(),
+            new BoxCellConverter(),
+            new PortalCellConverter(),
+        },
     };
 
-    public static void Save(Level level, string path)
+    // ----- Escrita (à mão, pra o layout ficar limpo) -----
+
+    public static void Save(Level l, string path)
     {
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        File.WriteAllText(path, JsonSerializer.Serialize(ToDto(level), Options));
+        var sb = new StringBuilder();
+        sb.Append("{\n");
+        sb.Append($"  \"Name\": {JsonSerializer.Serialize(l.Name)},\n");
+        sb.Append($"  \"Id\": {l.Id},\n");
+        sb.Append($"  \"Width\": {l.Width}, \"Height\": {l.Height}, \"Depth\": {l.Depth},\n");
+
+        AppendArray(sb, "Players", Format(l.PlayerSpawns), last: false);
+        AppendArray(sb, "Boxes", FormatBoxes(l.BoxSpawns), last: false);
+        AppendArray(sb, "Objectives", Format(l.ObjectiveSpawns), last: false);
+        AppendArray(sb, "Enemies", Format(l.EnemySpawns), last: false);
+        AppendArray(sb, "Obstacles", Format(l.ObstacleSpawns), last: false);
+        AppendArray(sb, "Portals", FormatPortals(l.PortalSpawns), last: true);
+
+        sb.Append("}\n");
+        File.WriteAllText(path, sb.ToString());
     }
+
+    private static List<string> Format(List<(int X, int Y, int Z)> cells)
+    {
+        var list = new List<string>(cells.Count);
+        foreach (var (x, y, z) in cells)
+            list.Add($"[{x}, {y}, {z}]");
+        return list;
+    }
+
+    private static List<string> FormatBoxes(List<(int X, int Y, int Z, BoxType Type)> cells)
+    {
+        var list = new List<string>(cells.Count);
+        foreach (var (x, y, z, t) in cells)
+            list.Add($"[{x}, {y}, {z}, \"{t}\"]");
+        return list;
+    }
+
+    private static List<string> FormatPortals(List<(int X, int Y, int Z, int LevelIndex, bool Completed)> cells)
+    {
+        var list = new List<string>(cells.Count);
+        foreach (var (x, y, z, idx, done) in cells)
+            list.Add($"[{x}, {y}, {z}, {idx}, {(done ? "true" : "false")}]");
+        return list;
+    }
+
+    /// <summary>Escreve a propriedade-array com um item por linha (ou <c>[]</c> se vazia).</summary>
+    private static void AppendArray(StringBuilder sb, string name, List<string> items, bool last)
+    {
+        sb.Append("  \"").Append(name).Append("\": ");
+        if (items.Count == 0)
+        {
+            sb.Append("[]");
+        }
+        else
+        {
+            sb.Append("[\n");
+            for (int i = 0; i < items.Count; i++)
+                sb.Append("    ").Append(items[i]).Append(i < items.Count - 1 ? ",\n" : "\n");
+            sb.Append("  ]");
+        }
+        sb.Append(last ? "\n" : ",\n");
+    }
+
+    // ----- Leitura -----
 
     public static Level Load(string path)
     {
-        var dto = JsonSerializer.Deserialize<LevelDto>(File.ReadAllText(path), Options);
+        var dto = JsonSerializer.Deserialize<LevelDto>(File.ReadAllText(path), ReadOptions);
         return FromDto(dto);
-    }
-
-    private static LevelDto ToDto(Level l)
-    {
-        var dto = new LevelDto
-        {
-            Name = l.Name,
-            Id = l.Id,
-            Width = l.Width,
-            Height = l.Height,
-            Depth = l.Depth,
-        };
-
-        foreach (var (x, y, z) in l.PlayerSpawns) dto.Players.Add(new(x, y, z));
-        foreach (var (x, y, z, t) in l.BoxSpawns) dto.Boxes.Add(new(x, y, z, t));
-        foreach (var (x, y, z) in l.ObjectiveSpawns) dto.Objectives.Add(new(x, y, z));
-        foreach (var (x, y, z) in l.EnemySpawns) dto.Enemies.Add(new(x, y, z));
-        foreach (var (x, y, z) in l.ObstacleSpawns) dto.Obstacles.Add(new(x, y, z));
-        foreach (var (x, y, z, idx, done) in l.PortalSpawns) dto.Portals.Add(new(x, y, z, idx, done));
-
-        return dto;
     }
 
     private static Level FromDto(LevelDto dto)
@@ -76,8 +122,6 @@ public static class LevelSerializer
         return level;
     }
 
-    // ----- DTO de serialização -----
-
     private sealed class LevelDto
     {
         public string Name { get; set; } = "Custom";
@@ -96,4 +140,61 @@ public static class LevelSerializer
     private record struct Cell(int X, int Y, int Z);
     private record struct BoxCell(int X, int Y, int Z, BoxType Type);
     private record struct PortalCell(int X, int Y, int Z, int LevelIndex, bool Completed);
+
+    private static void ExpectArray(ref Utf8JsonReader reader)
+    {
+        if (reader.TokenType != JsonTokenType.StartArray)
+            throw new JsonException("Esperava um array [x, y, z, ...] pra uma célula.");
+    }
+
+    private sealed class CellConverter : JsonConverter<Cell>
+    {
+        public override Cell Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            ExpectArray(ref reader);
+            reader.Read(); int x = reader.GetInt32();
+            reader.Read(); int y = reader.GetInt32();
+            reader.Read(); int z = reader.GetInt32();
+            reader.Read(); // EndArray
+            return new Cell(x, y, z);
+        }
+
+        public override void Write(Utf8JsonWriter writer, Cell v, JsonSerializerOptions options)
+            => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}]");
+    }
+
+    private sealed class BoxCellConverter : JsonConverter<BoxCell>
+    {
+        public override BoxCell Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            ExpectArray(ref reader);
+            reader.Read(); int x = reader.GetInt32();
+            reader.Read(); int y = reader.GetInt32();
+            reader.Read(); int z = reader.GetInt32();
+            reader.Read(); var t = Enum.Parse<BoxType>(reader.GetString()!, ignoreCase: true);
+            reader.Read(); // EndArray
+            return new BoxCell(x, y, z, t);
+        }
+
+        public override void Write(Utf8JsonWriter writer, BoxCell v, JsonSerializerOptions options)
+            => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, \"{v.Type}\"]");
+    }
+
+    private sealed class PortalCellConverter : JsonConverter<PortalCell>
+    {
+        public override PortalCell Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            ExpectArray(ref reader);
+            reader.Read(); int x = reader.GetInt32();
+            reader.Read(); int y = reader.GetInt32();
+            reader.Read(); int z = reader.GetInt32();
+            reader.Read(); int idx = reader.GetInt32();
+            reader.Read(); bool done = reader.GetBoolean();
+            reader.Read(); // EndArray
+            return new PortalCell(x, y, z, idx, done);
+        }
+
+        public override void Write(Utf8JsonWriter writer, PortalCell v, JsonSerializerOptions options)
+            => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, {v.LevelIndex}, {(v.Completed ? "true" : "false")}]");
+    }
 }

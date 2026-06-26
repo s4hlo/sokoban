@@ -70,13 +70,20 @@ Mínimo 1 por eixo. Ao encolher, peças fora dos novos limites são descartadas;
 clampeado. A câmera reenquadra automaticamente.
 
 ## Persistência
+Os mapas vivem como JSON em `Maps/level_<id>.json` e são a **única fonte de verdade**: o
+`LevelCatalog` só carrega de lá, e o editor grava lá. Não há definição embutida em C# nem
+fallback — mapa ausente é erro explícito. Logo, editar + `F5` altera o mapa oficial daquele
+id, e a mudança sobrevive a reiniciar e a concluir o nível.
+
 | Tecla | Ação |
 |-------|------|
-| F5 | salva o nível em `CustomLevels/level_<id>.json` (caminho absoluto logado) |
+| F5 | salva o nível em `Maps/level_<id>.json` (caminho absoluto logado) |
 | F9 | recarrega esse arquivo no editor |
 | N | novo nível em branco (piso preenchido + 1 player) no slot atual |
 
-Serialização: JSON legível (System.Text.Json) via DTO dedicado, enums como string.
+Formato: JSON legível, uma célula por linha — `[x, y, z]` (marcadores/obstáculos),
+`[x, y, z, "Tipo"]` (caixas), `[x, y, z, alvo, concluido]` (portais). Leitura via
+System.Text.Json + conversores; escrita à mão pro layout ficar limpo.
 
 ## HUD
 Overlay de texto (SpriteFont) no canto: modo, posição do cursor, dimensões do grid, brush

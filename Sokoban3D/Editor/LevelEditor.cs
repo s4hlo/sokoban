@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using Microsoft.Xna.Framework.Input;
 using Serilog;
 using Sokoban3D.Core;
@@ -20,6 +19,7 @@ public class LevelEditor
     private const int MaxSize = 32;
 
     private readonly LevelManager _levels;
+    private readonly LevelRepository _repo;
 
     // Receita em edição (clone do nível ativo). Null fora do modo editor.
     private Level _working;
@@ -39,9 +39,10 @@ public class LevelEditor
     /// <summary>Disparado quando as dimensões do grid mudam (a câmera precisa reenquadrar).</summary>
     public event Action GridChanged;
 
-    public LevelEditor(LevelManager levels)
+    public LevelEditor(LevelManager levels, LevelRepository repo)
     {
         _levels = levels;
+        _repo = repo;
     }
 
     /// <summary>
@@ -262,36 +263,29 @@ public class LevelEditor
         if (Pressed(k, Keys.N)) NewBlank();
     }
 
-    private string PathFor(Level level)
-    {
-        var dir = Path.Combine(Directory.GetCurrentDirectory(), "CustomLevels");
-        string file = level.Id >= 0 ? $"level_{level.Id}.json" : "custom.json";
-        return Path.Combine(dir, file);
-    }
-
     private void SaveToDisk()
     {
-        var path = PathFor(_working);
-        LevelSerializer.Save(_working, path);
+        // Grava no repositório oficial: o mapa editado vira a fonte de verdade daquele id.
+        _repo.Save(_working);
+        var path = _repo.PathFor(_working.Id);
         Status = $"Salvo: {path}";
         Log.Information("Editor: nivel salvo em {Path}", path);
     }
 
     private void LoadFromDisk()
     {
-        var path = PathFor(_working);
-        if (!File.Exists(path))
+        if (!_repo.Exists(_working.Id))
         {
-            Status = $"Sem arquivo: {path}";
+            Status = $"Sem arquivo: {_repo.PathFor(_working.Id)}";
             return;
         }
 
-        _working = LevelSerializer.Load(path);
+        _working = _repo.Load(_working.Id);
         ClampCursor();
         Rebuild();
-        Status = $"Carregado: {path}";
+        Status = $"Carregado: {_repo.PathFor(_working.Id)}";
         GridChanged?.Invoke();
-        Log.Information("Editor: nivel carregado de {Path}", path);
+        Log.Information("Editor: nivel carregado de {Path}", _repo.PathFor(_working.Id));
     }
 
     private void NewBlank()
