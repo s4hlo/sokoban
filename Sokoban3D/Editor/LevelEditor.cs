@@ -33,6 +33,9 @@ public class LevelEditor
     public EditorBrush Brush { get; private set; } = EditorBrush.Obstacle;
     public BoxType BoxType { get; private set; } = BoxType.Medium;
     public int PortalTarget { get; private set; } = 1;
+    // Grupo que liga placas aos blocos toggle, e o estado de repouso do bloco que será colocado.
+    public int Group { get; private set; } = 0;
+    public bool ToggleSolidByDefault { get; private set; } = true;
     public Level Working => _working;
     public string Status { get; private set; } = "";
 
@@ -130,10 +133,28 @@ public class LevelEditor
         if (Pressed(k, Keys.D3)) Brush = EditorBrush.Objective;
         if (Pressed(k, Keys.D4)) Brush = EditorBrush.Portal;
         if (Pressed(k, Keys.D5)) Brush = EditorBrush.Player;
+        if (Pressed(k, Keys.D6)) Brush = EditorBrush.Plate;
+        if (Pressed(k, Keys.D7))
+        {
+            // Repetir a tecla do toggle alterna o estado de repouso (some-ao-pisar / aparece-ao-pisar).
+            if (Brush == EditorBrush.Toggle)
+                ToggleSolidByDefault = !ToggleSolidByDefault;
+            Brush = EditorBrush.Toggle;
+        }
         if (Pressed(k, Keys.D0)) Brush = EditorBrush.Eraser;
 
-        if (Pressed(k, Keys.OemOpenBrackets)) PortalTarget = Math.Max(0, PortalTarget - 1);
-        if (Pressed(k, Keys.OemCloseBrackets)) PortalTarget++;
+        // [ ] ajustam o alvo do portal ou o grupo da placa/toggle, conforme a brush ativa.
+        bool grouping = Brush == EditorBrush.Plate || Brush == EditorBrush.Toggle;
+        if (Pressed(k, Keys.OemOpenBrackets))
+        {
+            if (grouping) Group = Math.Max(0, Group - 1);
+            else PortalTarget = Math.Max(0, PortalTarget - 1);
+        }
+        if (Pressed(k, Keys.OemCloseBrackets))
+        {
+            if (grouping) Group++;
+            else PortalTarget++;
+        }
     }
 
     // ----- Colocar / apagar -----
@@ -179,6 +200,14 @@ public class LevelEditor
                 RemoveMarkersAt(x, y, z);
                 _working.PortalSpawns.Add((x, y, z, PortalTarget, false));
                 break;
+            case EditorBrush.Plate:
+                RemoveMarkersAt(x, y, z);
+                _working.PlateSpawns.Add((x, y, z, Group));
+                break;
+            case EditorBrush.Toggle:
+                RemoveSolidsAt(x, y, z);
+                _working.ToggleSpawns.Add((x, y, z, Group, ToggleSolidByDefault));
+                break;
             case EditorBrush.Eraser:
                 EraseCell(x, y, z);
                 break;
@@ -197,12 +226,14 @@ public class LevelEditor
         _working.BoxSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.PlayerSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.EnemySpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
+        _working.ToggleSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
     }
 
     private void RemoveMarkersAt(int x, int y, int z)
     {
         _working.ObjectiveSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.PortalSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
+        _working.PlateSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
     }
 
     // ----- Redimensionar -----
@@ -252,6 +283,8 @@ public class LevelEditor
         _working.EnemySpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.ObjectiveSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.PortalSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
+        _working.PlateSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
+        _working.ToggleSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
     }
 
     // ----- Arquivos -----

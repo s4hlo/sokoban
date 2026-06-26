@@ -11,5 +11,7 @@ public enum EditorBrush
     Objective,
     Portal,
     Player,
+    Plate,
+    Toggle,
     Eraser,
 }

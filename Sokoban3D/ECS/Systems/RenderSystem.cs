@@ -25,6 +25,14 @@ public class RenderSystem
     private static readonly Color PortalColor = new(70, 200, 210);
     private static readonly Color PortalDoneColor = new(70, 200, 110);
 
+    // Placa de pressão (tile plano): clara em repouso, acende quando há peça em cima.
+    private static readonly Color PlateColor = new(150, 110, 200);
+    private static readonly Color PlatePressedColor = new(210, 170, 255);
+    // Bloco toggle: cubo roxo quando sólido; tile fino (pegada) quando aberto, pra anteceder
+    // onde ele vai aparecer.
+    private static readonly Color ToggleSolidColor = new(130, 80, 190);
+    private static readonly Color ToggleOpenColor = new(80, 55, 110);
+
     // Cor por tipo de caixa: leve clara, média intermediária, pesada escura, frágil avermelhada.
     private static readonly Color LightBoxColor = new(210, 180, 140);
     private static readonly Color MediumBoxColor = new(160, 110, 60);
@@ -47,8 +55,34 @@ public class RenderSystem
         _world = session;
         DrawDeathFloor(view, projection);
         DrawObstacles(view, projection);
+        DrawToggles(view, projection);
         DrawMarkers(view, projection);
         DrawEntities(view, projection);
+    }
+
+    /// <summary>
+    /// Blocos toggle: cubo cheio quando sólidos (igual a obstáculo, mas roxo); quando abertos,
+    /// um tile fino na célula sinaliza onde o bloco vai reaparecer ao soltar a placa.
+    /// </summary>
+    private void DrawToggles(Matrix view, Matrix projection)
+    {
+        var grid = _world.Grid;
+        var cubeScale = new Vector3(0.96f, 1f, 0.96f);
+        var ghostScale = new Vector3(0.7f, 0.08f, 0.7f);
+
+        var solid = new QueryDescription().WithAll<Toggle, GridPosition, Solid>();
+        _world.World.Query(in solid, (ref GridPosition p) =>
+        {
+            var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.ObstacleRise);
+            _cubes.Draw(pos, cubeScale, ToggleSolidColor, view, projection);
+        });
+
+        var open = new QueryDescription().WithAll<Toggle, GridPosition>().WithNone<Solid>();
+        _world.World.Query(in open, (ref GridPosition p) =>
+        {
+            var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
+            _cubes.Draw(pos, ghostScale, ToggleOpenColor, view, projection);
+        });
     }
 
     /// <summary>
@@ -72,6 +106,15 @@ public class RenderSystem
         {
             var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
             var color = portal.Completed ? PortalDoneColor : PortalColor;
+            _cubes.Draw(pos, tileScale, color, view, projection);
+        });
+
+        // Placas de pressão: acendem quando há uma peça ocupando a célula (acionada).
+        var plates = new QueryDescription().WithAll<PressurePlate, GridPosition>();
+        _world.World.Query(in plates, (ref GridPosition p) =>
+        {
+            var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
+            var color = grid.Occupant(p.X, p.Y, p.Z) is not null ? PlatePressedColor : PlateColor;
             _cubes.Draw(pos, tileScale, color, view, projection);
         });
     }

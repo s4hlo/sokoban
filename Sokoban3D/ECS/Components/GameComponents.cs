@@ -95,6 +95,32 @@ public struct Obstacle
 }
 
 /// <summary>
+/// Placa de pressão: aciona enquanto houver uma peça que ocupa o grid (player ou caixa) em
+/// cima dela. NÃO ocupa o grid (a peça precisa poder pisar). Liga-se aos blocos
+/// <see cref="Toggle"/> de mesmo <see cref="Group"/>: pressionada, ela inverte o estado deles.
+/// O acionamento é momentâneo — some o peso, o bloco volta ao default.
+/// </summary>
+public struct PressurePlate
+{
+    public int Group;
+}
+
+/// <summary>
+/// Bloco controlável por <see cref="PressurePlate"/>: um voxel sólido que aparece/some
+/// conforme as placas do seu <see cref="Group"/>. <see cref="SolidByDefault"/> é o estado em
+/// repouso (nenhuma placa pressionada): true = porta presente que SOME ao pisar; false = ponte
+/// ausente que APARECE ao pisar. Pressionada qualquer placa do grupo, o estado inverte.
+/// Quando sólido, ganha o tag <see cref="Solid"/> e ocupa o grid (igual a um obstáculo); quando
+/// aberto, perde o tag e some — exatamente como uma caixa frágil quebrada, então o undo o
+/// reverte pela mesma máquina (<see cref="Core.EntityState.WasSolid"/>).
+/// </summary>
+public struct Toggle
+{
+    public int Group;
+    public bool SolidByDefault;
+}
+
+/// <summary>
 /// Marca uma entity como inimigo
 /// </summary>
 public struct Enemy

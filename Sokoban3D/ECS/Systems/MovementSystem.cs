@@ -75,7 +75,12 @@ public class MovementSystem
         // Gravidade: toda peça que se moveu (player + caixas empurradas) cai até pousar.
         // A queda faz parte da MESMA ação no histórico — as posições anteriores já estão
         // gravadas em `record`, então um único Z reverte movimento + queda.
-        ApplyGravity(record);
+        Gravity.Apply(_world, MoversFrom(record), record);
+
+        // Placas de pressão: a ocupação acabou de mudar, então re-deriva os blocos toggle
+        // (e a queda do que repousava sobre um que sumiu) DENTRO desta ação — assim o mesmo
+        // Z reverte movimento + placa + queda. Pode congelar o player (bloco aparecendo nele).
+        PressurePlateSystem.Resolve(_world, record);
 
         _history.Push(record);
 
@@ -85,34 +90,14 @@ public class MovementSystem
             _world.PlayerFell = true;
     }
 
-    /// <summary>
-    /// Aplica gravidade a cada peça que ocupa célula dentre as afetadas pela ação: ela
-    /// desce enquanto a célula logo abaixo estiver vazia, parando ao encontrar obstáculo,
-    /// caixa ou o limite inferior do grid (o chão-morte). Processa de baixo pra cima pra
-    /// que apoios assentem antes do que está sobre eles.
-    /// </summary>
-    private void ApplyGravity(List<EntityState> affected)
+    /// <summary>Peças distintas que ocupam o grid dentre as afetadas pela ação (candidatas a cair).</summary>
+    private List<Entity> MoversFrom(List<EntityState> affected)
     {
         var movers = new List<Entity>();
         foreach (var s in affected)
             if (_world.World.Has<Solid>(s.Entity) && !movers.Contains(s.Entity))
                 movers.Add(s.Entity);
-
-        movers.Sort((a, b) =>
-            _world.World.Get<GridPosition>(a).Y.CompareTo(_world.World.Get<GridPosition>(b).Y));
-
-        foreach (var e in movers)
-        {
-            var pos = _world.World.Get<GridPosition>(e);
-            int ny = pos.Y;
-            while (!_world.Grid.IsOccupied(pos.X, ny - 1, pos.Z))
-                ny--;
-
-            if (ny == pos.Y)
-                continue;
-
-            _world.Move(e, new GridPosition(pos.X, ny, pos.Z));
-        }
+        return movers;
     }
 
     /// <summary>

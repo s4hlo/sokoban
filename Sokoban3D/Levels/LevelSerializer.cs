@@ -23,6 +23,8 @@ public static class LevelSerializer
             new CellConverter(),
             new BoxCellConverter(),
             new PortalCellConverter(),
+            new PlateCellConverter(),
+            new ToggleCellConverter(),
         },
     };
 
@@ -45,7 +47,9 @@ public static class LevelSerializer
         AppendArray(sb, "Objectives", Format(l.ObjectiveSpawns), last: false);
         AppendArray(sb, "Enemies", Format(l.EnemySpawns), last: false);
         AppendArray(sb, "Obstacles", Format(l.ObstacleSpawns), last: false);
-        AppendArray(sb, "Portals", FormatPortals(l.PortalSpawns), last: true);
+        AppendArray(sb, "Portals", FormatPortals(l.PortalSpawns), last: false);
+        AppendArray(sb, "Plates", FormatPlates(l.PlateSpawns), last: false);
+        AppendArray(sb, "Toggles", FormatToggles(l.ToggleSpawns), last: true);
 
         sb.Append("}\n");
         File.WriteAllText(path, sb.ToString());
@@ -72,6 +76,22 @@ public static class LevelSerializer
         var list = new List<string>(cells.Count);
         foreach (var (x, y, z, idx, done) in cells)
             list.Add($"[{x}, {y}, {z}, {idx}, {(done ? "true" : "false")}]");
+        return list;
+    }
+
+    private static List<string> FormatPlates(List<(int X, int Y, int Z, int Group)> cells)
+    {
+        var list = new List<string>(cells.Count);
+        foreach (var (x, y, z, g) in cells)
+            list.Add($"[{x}, {y}, {z}, {g}]");
+        return list;
+    }
+
+    private static List<string> FormatToggles(List<(int X, int Y, int Z, int Group, bool SolidByDefault)> cells)
+    {
+        var list = new List<string>(cells.Count);
+        foreach (var (x, y, z, g, solid) in cells)
+            list.Add($"[{x}, {y}, {z}, {g}, {(solid ? "true" : "false")}]");
         return list;
     }
 
@@ -118,6 +138,8 @@ public static class LevelSerializer
         foreach (var c in dto.Enemies) level.EnemySpawns.Add((c.X, c.Y, c.Z));
         foreach (var c in dto.Obstacles) level.ObstacleSpawns.Add((c.X, c.Y, c.Z));
         foreach (var p in dto.Portals) level.PortalSpawns.Add((p.X, p.Y, p.Z, p.LevelIndex, p.Completed));
+        foreach (var p in dto.Plates) level.PlateSpawns.Add((p.X, p.Y, p.Z, p.Group));
+        foreach (var t in dto.Toggles) level.ToggleSpawns.Add((t.X, t.Y, t.Z, t.Group, t.SolidByDefault));
 
         return level;
     }
@@ -135,11 +157,15 @@ public static class LevelSerializer
         public List<Cell> Enemies { get; set; } = new();
         public List<Cell> Obstacles { get; set; } = new();
         public List<PortalCell> Portals { get; set; } = new();
+        public List<PlateCell> Plates { get; set; } = new();
+        public List<ToggleCell> Toggles { get; set; } = new();
     }
 
     private record struct Cell(int X, int Y, int Z);
     private record struct BoxCell(int X, int Y, int Z, BoxType Type);
     private record struct PortalCell(int X, int Y, int Z, int LevelIndex, bool Completed);
+    private record struct PlateCell(int X, int Y, int Z, int Group);
+    private record struct ToggleCell(int X, int Y, int Z, int Group, bool SolidByDefault);
 
     private static void ExpectArray(ref Utf8JsonReader reader)
     {
@@ -196,5 +222,40 @@ public static class LevelSerializer
 
         public override void Write(Utf8JsonWriter writer, PortalCell v, JsonSerializerOptions options)
             => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, {v.LevelIndex}, {(v.Completed ? "true" : "false")}]");
+    }
+
+    private sealed class PlateCellConverter : JsonConverter<PlateCell>
+    {
+        public override PlateCell Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            ExpectArray(ref reader);
+            reader.Read(); int x = reader.GetInt32();
+            reader.Read(); int y = reader.GetInt32();
+            reader.Read(); int z = reader.GetInt32();
+            reader.Read(); int g = reader.GetInt32();
+            reader.Read(); // EndArray
+            return new PlateCell(x, y, z, g);
+        }
+
+        public override void Write(Utf8JsonWriter writer, PlateCell v, JsonSerializerOptions options)
+            => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, {v.Group}]");
+    }
+
+    private sealed class ToggleCellConverter : JsonConverter<ToggleCell>
+    {
+        public override ToggleCell Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            ExpectArray(ref reader);
+            reader.Read(); int x = reader.GetInt32();
+            reader.Read(); int y = reader.GetInt32();
+            reader.Read(); int z = reader.GetInt32();
+            reader.Read(); int g = reader.GetInt32();
+            reader.Read(); bool solid = reader.GetBoolean();
+            reader.Read(); // EndArray
+            return new ToggleCell(x, y, z, g, solid);
+        }
+
+        public override void Write(Utf8JsonWriter writer, ToggleCell v, JsonSerializerOptions options)
+            => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, {v.Group}, {(v.SolidByDefault ? "true" : "false")}]");
     }
 }

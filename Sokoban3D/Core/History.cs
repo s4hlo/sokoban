@@ -53,9 +53,16 @@ public class History
         {
             bool isSolid = world.World.Has<Solid>(s.Entity);
             if (s.WasSolid && !isSolid)
+                // Volta a ocupar o grid fica pro passo 2 (Occupy ao reposicionar).
                 world.World.Add(s.Entity, new Solid());
             else if (!s.WasSolid && isSolid)
+            {
+                // Peça que ficou sólida na ação desfeita (ex.: bloco toggle que apareceu):
+                // libera a célula AQUI — o passo 2 só reposiciona quem ocupa, e esta peça
+                // deixa de ocupar.
+                world.Vacate(s.Entity);
                 world.World.Remove<Solid>(s.Entity);
+            }
         }
 
         // 2) Restaura a posição peça-a-peça, de trás pra frente, liberando a célula só

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Arch.Core;
 using Sokoban3D.Core;
 using Sokoban3D.ECS.Components;
+using Sokoban3D.ECS.Systems;
 
 namespace Sokoban3D.Levels;
 
@@ -53,6 +54,11 @@ public class Level
     // Qualquer nível pode ter portais — é assim que a árvore se ramifica.
     public List<(int X, int Y, int Z, int LevelIndex, bool Completed)> PortalSpawns = new();
 
+    // Placas de pressão e blocos controláveis. Group liga as placas aos toggles de mesmo número.
+    // Não ocupam o grid (placas); os toggles ocupam quando sólidos. SolidByDefault: estado em repouso.
+    public List<(int X, int Y, int Z, int Group)> PlateSpawns = new();
+    public List<(int X, int Y, int Z, int Group, bool SolidByDefault)> ToggleSpawns = new();
+
     /// <summary>
     /// Cópia profunda da receita. O editor edita um clone do nível ativo, então o estado de
     /// jogo (caixas já movidas) não interfere no design, e vice-versa.
@@ -72,6 +78,8 @@ public class Level
             EnemySpawns = new(EnemySpawns),
             ObstacleSpawns = new(ObstacleSpawns),
             PortalSpawns = new(PortalSpawns),
+            PlateSpawns = new(PlateSpawns),
+            ToggleSpawns = new(ToggleSpawns),
         };
     }
 }
@@ -165,6 +173,35 @@ public class LevelManager
                 new LevelPortal { LevelIndex = levelIndex, Completed = completed }
             );
         }
+
+        // Spawn placas de pressão. Não ocupam o grid (o player/caixa pisa em cima pra acionar).
+        foreach (var (x, y, z, group) in level.PlateSpawns)
+        {
+            session.World.Create(
+                new GridPosition(x, y, z),
+                new PressurePlate { Group = group }
+            );
+        }
+
+        // Spawn blocos toggle no estado de repouso: sólidos (ocupam o grid, igual a obstáculo)
+        // só se SolidByDefault. Não se movem — sem SpawnPosition/RenderPosition.
+        foreach (var (x, y, z, group, solidByDefault) in level.ToggleSpawns)
+        {
+            var entity = solidByDefault
+                ? session.World.Create(
+                    new GridPosition(x, y, z),
+                    new Toggle { Group = group, SolidByDefault = true },
+                    new Solid())
+                : session.World.Create(
+                    new GridPosition(x, y, z),
+                    new Toggle { Group = group, SolidByDefault = false });
+
+            if (solidByDefault)
+                session.Occupy(entity);
+        }
+
+        // Estado inicial das placas: uma peça pode já nascer sobre uma placa (inverte o bloco).
+        PressurePlateSystem.Resolve(session, new List<EntityState>());
     }
 
     /// <summary>
@@ -193,6 +230,13 @@ public class LevelManager
 
             snapshot.Add(new EntityState(e, pos, session.World.Has<Solid>(e)));
         });
+
+        // Blocos toggle não têm SpawnPosition (não se movem), mas a sua solidez muda em jogo.
+        // Captura o estado atual deles também, pra o undo do restart reverter a volta ao default.
+        var toggles = new QueryDescription().WithAll<Toggle, GridPosition>();
+        session.World.Query(in toggles, (Entity e, ref GridPosition pos) =>
+            snapshot.Add(new EntityState(e, pos, session.World.Has<Solid>(e))));
+
         history.Push(snapshot);
 
         // 2) Reposiciona cada peça pro spawn e reconstrói o grid do zero. O player deixa
@@ -222,6 +266,10 @@ public class LevelManager
 
         foreach (var e in toResolidify)
             session.World.Add(e, new Solid());
+
+        // Blocos toggle voltam ao repouso (o Clear acima zerou a ocupação deles) e re-derivam
+        // pelas placas — uma peça pode ter voltado a um spawn que fica sobre uma placa.
+        PressurePlateSystem.Reset(session);
     }
 
     private static void DestroyAllEntities(GameWorld session)
