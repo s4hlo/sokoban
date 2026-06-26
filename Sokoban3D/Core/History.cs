@@ -5,21 +5,21 @@ using Sokoban3D.ECS.Components;
 namespace Sokoban3D.Core;
 
 /// <summary>
-/// Estado anterior de uma peça afetada por uma ação: posição e, se for caixa, os dados
-/// da caixa (tipo + quebrada). Guardar o estado — não só a posição — deixa o undo
-/// reverter mudanças como uma caixa frágil que quebrou.
+/// Estado anterior de uma peça afetada por uma ação: a posição e se ela ocupava o grid
+/// (<see cref="WasSolid"/>) no momento do registro. Guardar a ocupação — não só a posição —
+/// deixa o undo reverter mudanças como uma caixa frágil que quebrou (readicionando o Solid).
 /// </summary>
 public readonly struct EntityState
 {
     public readonly Entity Entity;
     public readonly GridPosition Position;
-    public readonly Box? BoxState;
+    public readonly bool WasSolid;
 
-    public EntityState(Entity entity, GridPosition position, Box? boxState)
+    public EntityState(Entity entity, GridPosition position, bool wasSolid)
     {
         Entity = entity;
         Position = position;
-        BoxState = boxState;
+        WasSolid = wasSolid;
     }
 }
 
@@ -46,12 +46,16 @@ public class History
 
         var states = _stack.Pop();
 
-        // 1) Restaura o estado de caixa (tipo/quebrada) antes da posição, pra que
-        //    Occupies já enxergue o estado restaurado (ex.: frágil que volta inteira).
+        // 1) Restaura a ocupação (presença do Solid) antes da posição, pra que Occupies já
+        //    enxergue o estado restaurado (ex.: frágil que volta inteira reocupa o grid).
+        //    Mudança estrutural segura: aqui se itera uma List, não uma World.Query.
         foreach (var s in states)
         {
-            if (s.BoxState.HasValue)
-                world.World.Set(s.Entity, s.BoxState.Value);
+            bool isSolid = world.World.Has<Solid>(s.Entity);
+            if (s.WasSolid && !isSolid)
+                world.World.Add(s.Entity, new Solid());
+            else if (!s.WasSolid && isSolid)
+                world.World.Remove<Solid>(s.Entity);
         }
 
         // 2) Restaura a posição peça-a-peça, de trás pra frente, liberando a célula só
@@ -107,7 +111,7 @@ public class History
         if (!world.Grid.IsOccupied(x, y, z))
             return true; // já livre
 
-        Entity? occupant = FindOccupantAt(world, x, y, z);
+        Entity? occupant = world.Spatial.Occupant(x, y, z);
         if (occupant is null)
             return false; // ocupado por algo sem entidade conhecida: por segurança, bloqueia
 
@@ -132,42 +136,7 @@ public class History
         return true;
     }
 
-    /// <summary>Acha a peça que ocupa uma célula (player, caixa não-quebrada ou inimigo).</summary>
-    private static Entity? FindOccupantAt(GameWorld world, int x, int y, int z)
-    {
-        Entity? found = null;
-
-        var players = new QueryDescription().WithAll<Player, GridPosition>();
-        world.World.Query(in players, (Entity e, ref GridPosition p) =>
-        {
-            if (p.X == x && p.Y == y && p.Z == z) found = e;
-        });
-        if (found is not null) return found;
-
-        var boxes = new QueryDescription().WithAll<Box, GridPosition>();
-        world.World.Query(in boxes, (Entity e, ref Box b, ref GridPosition p) =>
-        {
-            if (!b.Broken && p.X == x && p.Y == y && p.Z == z) found = e;
-        });
-        if (found is not null) return found;
-
-        var enemies = new QueryDescription().WithAll<Enemy, GridPosition>();
-        world.World.Query(in enemies, (Entity e, ref GridPosition p) =>
-        {
-            if (p.X == x && p.Y == y && p.Z == z) found = e;
-        });
-        return found;
-    }
-
-    /// <summary>Uma peça ocupa célula se for o player, um inimigo, ou uma caixa não-quebrada.</summary>
+    /// <summary>Uma peça ocupa célula se tem o tag <see cref="Solid"/>.</summary>
     private static bool Occupies(GameWorld world, Entity entity)
-    {
-        if (world.World.Has<Player>(entity))
-            return true;
-        if (world.World.Has<Enemy>(entity))
-            return true;
-        if (world.World.Has<Box>(entity))
-            return !world.World.Get<Box>(entity).Broken;
-        return false;
-    }
+        => world.World.Has<Solid>(entity);
 }

@@ -79,7 +79,8 @@ public class LevelManager
         {
             session.World.Create(
                 new GridPosition(x, y, z),
-                new Obstacle()
+                new Obstacle(),
+                new Solid()
             );
             session.Grid.SetOccupied(x, y, z, true);
         }
@@ -91,7 +92,8 @@ public class LevelManager
                 new GridPosition(x, y, z),
                 new Player { Speed = 1f },
                 new SpawnPosition(x, y, z),
-                new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise))
+                new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise)),
+                new Solid()
             );
             session.Grid.SetOccupied(x, y, z, true);
         }
@@ -103,7 +105,8 @@ public class LevelManager
                 new GridPosition(x, y, z),
                 new Box { Type = type },
                 new SpawnPosition(x, y, z),
-                new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise))
+                new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise)),
+                new Solid()
             );
             session.Grid.SetOccupied(x, y, z, true);
         }
@@ -125,7 +128,8 @@ public class LevelManager
             var entity = session.World.Create(
                 new GridPosition(x, y, z),
                 new Enemy { Speed = 0.5f },
-                new SpawnPosition(x, y, z)
+                new SpawnPosition(x, y, z),
+                new Solid()
             );
             session.Grid.SetOccupied(x, y, z, true);
         }
@@ -165,8 +169,7 @@ public class LevelManager
             if (session.World.Has<Box>(e) && session.World.Get<Box>(e).Type == BoxType.Permanent)
                 return;
 
-            Box? boxState = session.World.Has<Box>(e) ? session.World.Get<Box>(e) : null;
-            snapshot.Add(new EntityState(e, pos, boxState));
+            snapshot.Add(new EntityState(e, pos, session.World.Has<Solid>(e)));
         });
         history.Push(snapshot);
 
@@ -181,20 +184,22 @@ public class LevelManager
         session.World.Query(in obstacles, (ref GridPosition pos) =>
             session.Grid.SetOccupied(pos.X, pos.Y, pos.Z, true));
 
+        // Caixas que tinham quebrado precisam reocupar o grid (readicionar Solid). Como Add é
+        // mudança estrutural — proibida durante a iteração de uma query —, coleta-se aqui e
+        // aplica-se depois.
+        var toResolidify = new List<Entity>();
         session.World.Query(in query, (Entity e, ref GridPosition pos, ref SpawnPosition spawn) =>
         {
             pos = new GridPosition(spawn.X, spawn.Y, spawn.Z);
 
-            // Caixa que tinha quebrado volta inteira.
-            if (session.World.Has<Box>(e))
-            {
-                var box = session.World.Get<Box>(e);
-                box.Broken = false;
-                session.World.Set(e, box);
-            }
+            if (!session.World.Has<Solid>(e))
+                toResolidify.Add(e);
 
             session.Grid.SetOccupied(spawn.X, spawn.Y, spawn.Z, true);
         });
+
+        foreach (var e in toResolidify)
+            session.World.Add(e, new Solid());
     }
 
     private static void DestroyAllEntities(GameWorld session)

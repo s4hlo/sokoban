@@ -42,11 +42,14 @@ public class MovementSystem
         if (dx == 0 && dz == 0)
             return;
 
-        var query = new QueryDescription().WithAll<Player, GridPosition>();
-        _world.World.Query(in query, (Entity entity, ref GridPosition pos) =>
-        {
-            TryMovePlayer(entity, pos, dx, dz);
-        });
+        // Resolve o player FORA de uma World.Query: o empurrão pode quebrar uma frágil
+        // (Remove<Solid>), que é mudança estrutural — proibida durante a iteração de uma query.
+        var player = _world.Spatial.First<Player>();
+        if (player is null)
+            return;
+
+        var pos = _world.World.Get<GridPosition>(player.Value);
+        TryMovePlayer(player.Value, pos, dx, dz);
     }
 
     private void TryMovePlayer(Entity player, GridPosition pos, int dx, int dz)
@@ -66,7 +69,7 @@ public class MovementSystem
                 return;
         }
 
-        record.Add(new EntityState(player, pos, null));
+        record.Add(new EntityState(player, pos, _world.World.Has<Solid>(player)));
         _world.Grid.SetOccupied(pos.X, pos.Y, pos.Z, false);
         _world.Grid.SetOccupied(targetX, pos.Y, targetZ, true);
         _world.World.Set(player, new GridPosition(targetX, pos.Y, targetZ));
@@ -94,7 +97,7 @@ public class MovementSystem
     {
         var movers = new List<Entity>();
         foreach (var s in affected)
-            if (Occupies(s.Entity) && !movers.Contains(s.Entity))
+            if (_world.World.Has<Solid>(s.Entity) && !movers.Contains(s.Entity))
                 movers.Add(s.Entity);
 
         movers.Sort((a, b) =>
@@ -116,16 +119,6 @@ public class MovementSystem
         }
     }
 
-    /// <summary>Uma peça ocupa célula se for o player ou uma caixa não-quebrada.</summary>
-    private bool Occupies(Entity e)
-    {
-        if (_world.World.Has<Player>(e))
-            return true;
-        if (_world.World.Has<Box>(e))
-            return !_world.World.Get<Box>(e).Broken;
-        return false;
-    }
-
     /// <summary>
     /// Tenta liberar a célula (x,y,z) na direção (dx,dz). Retorna true se a célula ficou
     /// livre (estava vazia, a caixa foi empurrada, ou a caixa frágil quebrou).
@@ -139,9 +132,10 @@ public class MovementSystem
         if (!_world.Grid.IsOccupied(x, y, z))
             return true; // já está livre
 
-        Entity? boxEntity = FindBoxAt(x, y, z);
-        if (boxEntity is null)
-            return false; // ocupado por algo que não é caixa
+        Entity? occupant = _world.Spatial.Occupant(x, y, z);
+        if (occupant is null || !_world.World.Has<Box>(occupant.Value))
+            return false; // ocupado por algo que não é caixa (player, inimigo, obstáculo)
+        Entity? boxEntity = occupant;
 
         var box = _world.World.Get<Box>(boxEntity.Value);
         int weight = BoxRules.Weight(box.Type);
@@ -162,7 +156,7 @@ public class MovementSystem
             // Empurra a caixa pra frente. Caixas imunes ao undo movem normalmente,
             // mas não são registradas — o undo não as reverte (só o R).
             if (!BoxRules.IgnoresUndo(box.Type))
-                record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), box));
+                record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), true));
             _world.Grid.SetOccupied(x, y, z, false);
             _world.Grid.SetOccupied(aheadX, y, aheadZ, true);
             _world.World.Set(boxEntity.Value, new GridPosition(aheadX, y, aheadZ));
@@ -172,7 +166,7 @@ public class MovementSystem
         // Não dá pra avançar. Frágil quebra (e libera a célula); o resto fica travado.
         if (box.Type == BoxType.Fragile)
         {
-            record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), box));
+            record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), true));
             BreakBox(boxEntity.Value);
             return true;
         }
@@ -180,26 +174,15 @@ public class MovementSystem
         return false;
     }
 
+    /// <summary>
+    /// Quebra a caixa: libera a célula e remove o tag <see cref="Solid"/> — deixa de ocupar
+    /// o grid e de ser desenhada. A entity persiste pra o undo conseguir reverter a quebra.
+    /// </summary>
     private void BreakBox(Entity entity)
     {
         var p = _world.World.Get<GridPosition>(entity);
         _world.Grid.SetOccupied(p.X, p.Y, p.Z, false);
-
-        var box = _world.World.Get<Box>(entity);
-        box.Broken = true;
-        _world.World.Set(entity, box);
-    }
-
-    private Entity? FindBoxAt(int x, int y, int z)
-    {
-        Entity? found = null;
-        var query = new QueryDescription().WithAll<Box, GridPosition>();
-        _world.World.Query(in query, (Entity entity, ref Box b, ref GridPosition p) =>
-        {
-            if (!b.Broken && p.X == x && p.Y == y && p.Z == z)
-                found = entity;
-        });
-        return found;
+        _world.World.Remove<Solid>(entity);
     }
 
     /// <summary>

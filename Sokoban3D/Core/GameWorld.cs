@@ -17,6 +17,9 @@ public class GameWorld
     public GridManager Grid { get; }
     public History History { get; }
 
+    /// <summary>Buscas espaciais ("quem está na célula?") sobre o <see cref="World"/> desta sessão.</summary>
+    public SpatialQuery Spatial { get; }
+
     /// <summary>Receita a partir da qual esta sessão foi montada (usada pelo restart).</summary>
     public Level CurrentLevel { get; set; }
 
@@ -34,6 +37,7 @@ public class GameWorld
         World = World.Create();
         Grid = new GridManager(gridWidth, gridHeight, gridDepth);
         History = new History();
+        Spatial = new SpatialQuery(World);
     }
 
     public void Dispose()

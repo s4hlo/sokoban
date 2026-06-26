@@ -133,17 +133,11 @@ public class Game1 : Game
             return;
 
         var p = playerPos.Value;
-        int target = -1;
-        var query = new QueryDescription().WithAll<LevelPortal, GridPosition>();
-        Active.World.Query(in query, (ref LevelPortal portal, ref GridPosition g) =>
-        {
-            if (g.X == p.X && g.Z == p.Z)
-                target = portal.LevelIndex;
-        });
-
-        if (target < 0)
+        var portalEntity = Active.Spatial.CellWith<LevelPortal>(p.X, p.Y, p.Z);
+        if (portalEntity is null)
             return;
 
+        int target = Active.World.Get<LevelPortal>(portalEntity.Value).LevelIndex;
         _stack.Push(OpenLevel(target));
         ReframeCamera();
         Log.Information("Entered level {Id}", target);
@@ -215,22 +209,13 @@ public class Game1 : Game
             return false;
 
         var p = playerPos.Value;
-        bool reached = false;
-        var query = new QueryDescription().WithAll<Objective, GridPosition>();
-        session.World.Query(in query, (ref GridPosition o) =>
-        {
-            if (o.X == p.X && o.Y == p.Y && o.Z == p.Z)
-                reached = true;
-        });
-        return reached;
+        return session.Spatial.CellWith<Objective>(p.X, p.Y, p.Z) is not null;
     }
 
     private static GridPosition? FindPlayerCell(GameWorld session)
     {
-        GridPosition? found = null;
-        var query = new QueryDescription().WithAll<Player, GridPosition>();
-        session.World.Query(in query, (ref GridPosition p) => found = p);
-        return found;
+        var player = session.Spatial.First<Player>();
+        return player is null ? null : session.World.Get<GridPosition>(player.Value);
     }
 
     // Detecção de borda: tecla recém-pressionada neste frame.

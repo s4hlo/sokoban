@@ -122,12 +122,10 @@ public class RenderSystem
             _cubes.Draw(r.Value, pieceScale, playerColor, view, projection);
         });
 
-        var boxes = new QueryDescription().WithAll<Box, RenderPosition>();
+        // Só caixas com Solid: as quebradas perdem o tag e somem naturalmente da query.
+        var boxes = new QueryDescription().WithAll<Box, RenderPosition, Solid>();
         _world.World.Query(in boxes, (ref Box b, ref RenderPosition r) =>
         {
-            if (b.Broken)
-                return; // caixa quebrada não é desenhada
-
             _cubes.Draw(r.Value, pieceScale, ColorOf(b.Type), view, projection);
         });
     }

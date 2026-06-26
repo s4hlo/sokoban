@@ -21,14 +21,13 @@ public enum BoxType
 }
 
 /// <summary>
-/// Marca uma entity como caixa, com seu tipo.
-/// Broken = caixa quebrada (frágil destruída): não ocupa grid nem é desenhada,
-/// mas a entity persiste pra que o undo consiga reverter a quebra.
+/// Marca uma entity como caixa, com seu tipo. Uma caixa quebrada (frágil destruída) perde
+/// o tag <see cref="Solid"/> — deixa de ocupar o grid e de ser desenhada —, mas a entity
+/// persiste pra que o undo consiga reverter a quebra (readicionando o <see cref="Solid"/>).
 /// </summary>
 public struct Box
 {
     public BoxType Type;
-    public bool Broken;
 }
 
 /// <summary>
@@ -52,6 +51,16 @@ public static class BoxRules
     /// normalmente, mas o undo não a reverte — só o restart (R) volta à posição inicial.
     /// </summary>
     public static bool IgnoresUndo(BoxType type) => type == BoxType.Permanent;
+}
+
+/// <summary>
+/// Tag: a entity ocupa uma célula do grid (player, caixa não-quebrada, inimigo, obstáculo).
+/// É a ÚNICA fonte de verdade sobre ocupação no nível do ECS — "essa peça ocupa o grid?"
+/// é sempre <c>World.Has&lt;Solid&gt;(e)</c>. Quebrar uma frágil remove o tag; o undo o
+/// readiciona. Objetivos e portais NÃO têm Solid (o player precisa pisar em cima).
+/// </summary>
+public struct Solid
+{
 }
 
 /// <summary>
