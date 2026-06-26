@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Microsoft.Xna.Framework.Input;
 using Serilog;
 using Sokoban3D.Core;
@@ -343,8 +344,34 @@ public class LevelEditor
         // Grava no repositório oficial: o mapa editado vira a fonte de verdade daquele id.
         _repo.Save(_working);
         var path = _repo.PathFor(_working.Id);
-        Status = $"Salvo: {path}";
+
+        // Portais que apontam para ids ainda sem mapa: cria um nível em branco pra cada um,
+        // pra o portal não levar a um arquivo inexistente (BuildLevel falharia ao entrar).
+        int created = CreateMissingPortalTargets();
+
+        Status = created > 0
+            ? $"Salvo: {path} (+{created} mapa(s) novo(s))"
+            : $"Salvo: {path}";
         Log.Information("Editor: nivel salvo em {Path}", path);
+    }
+
+    /// <summary>
+    /// Para cada destino de portal (LevelIndex) sem arquivo no repositório, grava um nível em
+    /// branco com aquele id. Retorna quantos mapas foram criados.
+    /// </summary>
+    private int CreateMissingPortalTargets()
+    {
+        int created = 0;
+        foreach (var target in _working.PortalSpawns.Select(p => p.LevelIndex).Distinct())
+        {
+            if (target == _working.Id || _repo.Exists(target))
+                continue;
+
+            _repo.Save(BlankLevel(target));
+            created++;
+            Log.Information("Editor: mapa em branco criado para portal -> nivel {Id}", target);
+        }
+        return created;
     }
 
     private void LoadFromDisk()
