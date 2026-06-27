@@ -69,8 +69,8 @@ public class RenderSystem
     private void DrawToggles(Matrix view, Matrix projection)
     {
         var grid = _world.Grid;
-        var cubeScale = new Vector3(0.96f, 1f, 0.96f);
-        var ghostScale = new Vector3(0.7f, 0.08f, 0.7f);
+        var cubeScale = Vector3.One;
+        var ghostScale = new Vector3(0.7f, 0.1f, 0.7f);
 
         var solid = new QueryDescription().WithAll<Toggle, GridPosition, Solid>();
         _world.World.Query(in solid, (ref GridPosition p) =>
@@ -149,14 +149,14 @@ public class RenderSystem
     }
 
     /// <summary>
-    /// Obstáculos: o terreno sólido. Cubos cheios na altura, levemente encolhidos em X/Z pra
-    /// aparecer a emenda entre blocos (lê melhor o relevo); a altura fica cheia pra os topos
-    /// alinharem com a base das peças e os empilhamentos ficarem coesos.
+    /// Obstáculos: o terreno sólido. Cubos cheios (1x1x1) que preenchem a célula inteira — a
+    /// emenda entre blocos agora vem das arestas escurecidas pela máscara de face, não de um vão
+    /// físico, então os empilhamentos ficam coesos e os topos alinham com a base das peças.
     /// </summary>
     private void DrawObstacles(Matrix view, Matrix projection)
     {
         var grid = _world.Grid;
-        var scale = new Vector3(0.96f, 1f, 0.96f);
+        var scale = Vector3.One;
 
         var query = new QueryDescription().WithAll<Obstacle, GridPosition>();
         _world.World.Query(in query, (ref GridPosition p) =>
@@ -168,20 +168,23 @@ public class RenderSystem
 
     private void DrawEntities(Matrix view, Matrix projection)
     {
-        var pieceScale = new Vector3(0.8f);
+        // Player levemente menor (0.8) pra destacar quem se controla; caixas preenchem a célula
+        // inteira (1x1x1), iguais aos obstáculos.
+        var playerScale = new Vector3(0.8f);
+        var boxScale = Vector3.One;
 
         var playerColor = _world.PlayerFell ? PlayerFellColor : PlayerColor;
         var players = new QueryDescription().WithAll<Player, RenderPosition>();
         _world.World.Query(in players, (ref RenderPosition r) =>
         {
-            _cubes.Draw(r.Value, pieceScale, playerColor, view, projection);
+            _cubes.Draw(r.Value, playerScale, playerColor, view, projection);
         });
 
         // Só caixas com Solid: as quebradas perdem o tag e somem naturalmente da query.
         var boxes = new QueryDescription().WithAll<Box, RenderPosition, Solid>();
         _world.World.Query(in boxes, (ref Box b, ref RenderPosition r) =>
         {
-            _cubes.Draw(r.Value, pieceScale, ColorOf(b.Type), view, projection);
+            _cubes.Draw(r.Value, boxScale, ColorOf(b.Type), view, projection);
         });
     }
 

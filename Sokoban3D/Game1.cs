@@ -71,7 +71,9 @@ public class Game1 : Game
     protected override void LoadContent()
     {
         // O CubeRenderer (preso ao device) é compartilhado entre o render do jogo e o do editor.
-        var cubes = new CubeRenderer(GraphicsDevice);
+        // A máscara de face escurece as bordas de todos os cubos preservando a cor de cada um.
+        var faceMask = Content.Load<Texture2D>("dft");
+        var cubes = new CubeRenderer(GraphicsDevice, faceMask);
         _renderSystem = new RenderSystem(cubes);
         _hudFont = Content.Load<SpriteFont>("Hud");
         _editorRenderer = new EditorRenderer(GraphicsDevice, cubes, _hudFont);

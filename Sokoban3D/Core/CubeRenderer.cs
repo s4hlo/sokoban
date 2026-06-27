@@ -21,14 +21,17 @@ public class CubeRenderer
     private readonly VertexBuffer _wireVertices;
     private readonly IndexBuffer _wireIndices;
 
-    public CubeRenderer(GraphicsDevice device)
+    // Máscara de face: textura branca que só escurece as bordas. Modula o DiffuseColor — cada
+    // cubo mantém a própria cor, mas com as arestas sombreadas pra ler melhor o volume.
+    public CubeRenderer(GraphicsDevice device, Texture2D faceMask)
     {
         _device = device;
 
         _effect = new BasicEffect(device)
         {
             LightingEnabled = true,
-            TextureEnabled = false,
+            TextureEnabled = true,
+            Texture = faceMask,
             VertexColorEnabled = false,
         };
         _effect.EnableDefaultLighting();
@@ -66,6 +69,8 @@ public class CubeRenderer
         _effect.Projection = projection;
         _effect.DiffuseColor = color.ToVector3();
 
+        // A máscara cobre exatamente a face (UV 0..1); clamp evita a borda sangrar pro lado oposto.
+        _device.SamplerStates[0] = SamplerState.LinearClamp;
         _device.SetVertexBuffer(_vertices);
         _device.Indices = _indices;
 
