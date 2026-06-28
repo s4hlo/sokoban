@@ -13,25 +13,23 @@ namespace Sokoban3D.ECS.Systems;
 /// placa, lógica OR; total de placas do grupo = só com TODAS, lógica AND). Acionado, o bloco
 /// inverte seu <see cref="Toggle.SolidByDefault"/>.
 ///
-/// É autoridade única sobre o tag <see cref="Solid"/> dos toggles. A solidez do toggle NUNCA
-/// entra no histórico de undo — é estado puramente DERIVADO das placas, então o undo não a
-/// reverte: ele restaura as posições e depois chama esta Resolve de novo pra re-derivar o estado
-/// dos toggles a partir das placas pressionadas no estado restaurado (ver <see cref="Core.History.Undo"/>).
-/// O que ENTRA no histórico é só a queda das peças que repousavam sobre um bloco que sumiu (isso é
-/// movimento real). Roda como último passo de cada movimento (a ocupação só muda em movimentos),
-/// no load e no restart.
+/// É autoridade única sobre o tag <see cref="Solid"/> dos toggles. A solidez do toggle é estado
+/// puramente DERIVADO das placas — não tem pilha, não entra no histórico, o undo é totalmente
+/// agnóstico a ela. Esta Resolve é a ÚNICA dona desse estado: roda no fim de cada movimento, no
+/// load, no restart e depois de um undo (o undo só restaura as posições das peças; o
+/// <see cref="Game1"/> chama esta Resolve em seguida pra re-derivar os toggles a partir do estado
+/// restaurado). A queda das peças que repousavam sobre um bloco que sumiu é movimento real e é
+/// capturada pelo histórico via snapshot do turno, não por aqui.
 /// </summary>
 public static class PressurePlateSystem
 {
     /// <summary>
-    /// Re-deriva todos os toggles a partir das placas pressionadas e aplica a diferença. A
-    /// mudança de solidez do toggle NÃO é gravada (é derivada); só a queda das peças que
-    /// repousavam sobre um bloco que sumiu vai pra <paramref name="record"/> — isso é movimento
-    /// real. Passe um record descartável ao re-derivar no undo. Um bloco que deveria aparecer sobre uma célula
-    /// ocupada fica PENDENTE (não materializa) — e se quem ocupa é o player, ele congela
-    /// (<see cref="GameWorld.PlayerFell"/>): preso, igual à queda, só sai com Z.
+    /// Re-deriva todos os toggles a partir das placas pressionadas e aplica a diferença. Um bloco
+    /// que deveria aparecer sobre uma célula ocupada fica PENDENTE (não materializa) — e se quem
+    /// ocupa é o player, ele congela (<see cref="GameWorld.PlayerFell"/>): preso, igual à queda, só
+    /// sai com Z.
     /// </summary>
-    public static void Resolve(GameWorld session, List<MoveStep> record)
+    public static void Resolve(GameWorld session)
     {
         var pressedCount = PressedCounts(session);
 
@@ -84,7 +82,7 @@ public static class PressurePlateSystem
         }
 
         if (fallers.Count > 0)
-            Gravity.Apply(session, fallers, record);
+            Gravity.Apply(session, fallers);
     }
 
     /// <summary>
@@ -119,8 +117,8 @@ public static class PressurePlateSystem
             session.Grid.Place(p.X, p.Y, p.Z, e);
         }
 
-        // Placas pressionadas já no spawn ainda devem inverter seus blocos. Sem histórico.
-        Resolve(session, new List<MoveStep>());
+        // Placas pressionadas já no spawn ainda devem inverter seus blocos.
+        Resolve(session);
     }
 
     /// <summary>Quantas placas de cada grupo estão pressionadas (peça ocupando sua célula).</summary>

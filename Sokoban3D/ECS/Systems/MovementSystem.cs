@@ -60,40 +60,40 @@ public class MovementSystem
         if (!_world.Grid.IsValid(targetX, pos.Y, targetZ))
             return;
 
-        var record = new List<MoveStep>();
+        // Snapshot do estado (posição + solidez) de toda peça com histórico ANTES de mutar o
+        // mundo. O turno só é confirmado se o player de fato se mover; aí o histórico grava o
+        // deslocamento líquido de cada peça (snapshot vs estado final), inclusive inércia.
+        var before = Snapshot();
 
         if (_world.Grid.IsOccupied(targetX, pos.Y, targetZ))
         {
-            // Só avança se a célula alvo puder ser liberada (empurrando ou quebrando).
-            if (!TryClear(targetX, pos.Y, targetZ, dx, dz, PlayerPushStrength, record))
+            // Só avança se a célula alvo puder ser liberada (empurrando ou quebrando). Falhou:
+            // não houve turno, o snapshot é descartado.
+            if (!TryClear(targetX, pos.Y, targetZ, dx, dz, PlayerPushStrength))
                 return;
         }
 
         var playerTo = new GridPosition(targetX, pos.Y, targetZ);
-        record.Add(MoveStep.Moved(player, pos, playerTo));
         _world.Move(player, playerTo);
 
         // Gravidade: toda peça que se moveu (player + caixas empurradas) cai até pousar.
-        // A queda faz parte da MESMA ação no histórico — as posições anteriores já estão
-        // gravadas em `record`, então um único Z reverte movimento + queda.
-        Gravity.Apply(_world, MoversFrom(record), record);
+        Gravity.Apply(_world, MovedSince(before));
 
-        // Placas de pressão: a ocupação acabou de mudar, então re-deriva os blocos toggle
-        // (e a queda do que repousava sobre um que sumiu) DENTRO desta ação — assim o mesmo
-        // Z reverte movimento + placa + queda. Pode congelar o player (bloco aparecendo nele).
-        PressurePlateSystem.Resolve(_world, record);
+        // Placas de pressão: a ocupação mudou, re-deriva os blocos toggle (e a queda do que
+        // repousava sobre um que sumiu). Pode congelar o player (bloco aparecendo nele).
+        PressurePlateSystem.Resolve(_world);
 
-        _history.Push(record);
+        // Fecha o turno: grava o que cada peça fez (ou inércia) na pilha dela.
+        CommitTurn(before);
 
-        // Placa atemporal: toda peça (player ou caixa) que terminou o passo sobre uma
-        // TimelessBase tem seu histórico expurgado — fica "commitada" ali, o undo não a reverte
-        // mais. Inclui o próprio passo que a levou até a placa. Sair da placa volta a gravar
-        // normalmente (Forget só apaga o passado; não é flag persistente).
-        foreach (var mover in MoversFrom(record))
+        // Placa atemporal: toda peça que terminou o turno sobre uma TimelessBase tem a pilha
+        // esvaziada — fica "commitada" ali (inclui o movimento que a levou até a placa, já gravado
+        // acima). Sair da placa volta a empilhar normalmente.
+        foreach (var e in before.Keys)
         {
-            var p = _world.World.Get<GridPosition>(mover);
+            var p = _world.World.Get<GridPosition>(e);
             if (_world.Spatial.CellWith<TimelessBase>(p.X, p.Y, p.Z) is not null)
-                _history.Forget(mover);
+                _history.Forget(e);
         }
 
         // Player que repousou em y==0 está apoiado só pelo chão-morte: caiu, congela.
@@ -102,13 +102,56 @@ public class MovementSystem
             _world.PlayerFell = true;
     }
 
-    /// <summary>Peças distintas que ocupam o grid dentre as afetadas pela ação (candidatas a cair).</summary>
-    private List<Entity> MoversFrom(List<MoveStep> affected)
+    /// <summary>
+    /// Estado (posição + se ocupa o grid) de cada peça com histórico — player, caixas, inimigos —
+    /// no início do turno. A caixa verde é excluída: ela nunca tem histórico (só o R a reverte).
+    /// </summary>
+    private Dictionary<Entity, (GridPosition Pos, bool Solid)> Snapshot()
+    {
+        var snap = new Dictionary<Entity, (GridPosition, bool)>();
+        var query = new QueryDescription().WithAll<GridPosition, SpawnPosition>();
+        _world.World.Query(in query, (Entity e, ref GridPosition p) =>
+        {
+            if (_world.World.Has<Box>(e) && _world.World.Get<Box>(e).Type == BoxType.Permanent)
+                return;
+            snap[e] = (p, _world.World.Has<Solid>(e));
+        });
+        return snap;
+    }
+
+    /// <summary>
+    /// Grava na pilha de cada peça o que ela fez neste turno: o deslocamento líquido (final menos
+    /// inicial) e a mudança de solidez. Toda peça grava — quem não se mexeu grava inércia —, o que
+    /// mantém as pilhas alinhadas por turno.
+    /// </summary>
+    private void CommitTurn(Dictionary<Entity, (GridPosition Pos, bool Solid)> before)
+    {
+        foreach (var (e, snap) in before)
+        {
+            var p = _world.World.Get<GridPosition>(e);
+            bool solid = _world.World.Has<Solid>(e);
+            var change = (snap.Solid, solid) switch
+            {
+                (true, false) => SolidChange.Lost,
+                (false, true) => SolidChange.Gained,
+                _ => SolidChange.None,
+            };
+            _history.Record(e, new Move(p.X - snap.Pos.X, p.Y - snap.Pos.Y, p.Z - snap.Pos.Z, change));
+        }
+    }
+
+    /// <summary>Peças que ocupam o grid e mudaram de posição desde o snapshot (candidatas a cair).</summary>
+    private List<Entity> MovedSince(Dictionary<Entity, (GridPosition Pos, bool Solid)> before)
     {
         var movers = new List<Entity>();
-        foreach (var s in affected)
-            if (_world.World.Has<Solid>(s.Entity) && !movers.Contains(s.Entity))
-                movers.Add(s.Entity);
+        foreach (var (e, snap) in before)
+        {
+            if (!_world.World.Has<Solid>(e))
+                continue;
+            var p = _world.World.Get<GridPosition>(e);
+            if (p.X != snap.Pos.X || p.Y != snap.Pos.Y || p.Z != snap.Pos.Z)
+                movers.Add(e);
+        }
         return movers;
     }
 
@@ -117,7 +160,7 @@ public class MovementSystem
     /// livre (estava vazia, a caixa foi empurrada, ou a caixa frágil quebrou).
     /// Só causa mutações nos caminhos que terminam em sucesso.
     /// </summary>
-    private bool TryClear(int x, int y, int z, int dx, int dz, int budget, List<MoveStep> record)
+    private bool TryClear(int x, int y, int z, int dx, int dz, int budget)
     {
         if (!_world.Grid.IsValid(x, y, z))
             return false; // parede
@@ -142,16 +185,13 @@ public class MovementSystem
         // então não empurra nada com peso. Prensada contra média/pesada, a frágil quebra
         // e a leve só trava (ver abaixo). As com peso repassam a força que sobra.
         int forwardBudget = weight == 0 ? 0 : budget - weight;
-        bool aheadClear = TryClear(aheadX, y, aheadZ, dx, dz, forwardBudget, record);
+        bool aheadClear = TryClear(aheadX, y, aheadZ, dx, dz, forwardBudget);
 
         if (aheadClear)
         {
-            // Empurra a caixa pra frente. Caixas imunes ao undo movem normalmente,
-            // mas não são registradas — o undo não as reverte (só o R).
-            var from = new GridPosition(x, y, z);
+            // Empurra a caixa pra frente. A caixa verde move normalmente; o CommitTurn não a grava
+            // (foi excluída do snapshot), então o undo não a reverte — só o R.
             var to = new GridPosition(aheadX, y, aheadZ);
-            if (!BoxRules.IgnoresUndo(box.Type))
-                record.Add(MoveStep.Moved(boxEntity.Value, from, to));
             _world.Move(boxEntity.Value, to);
             return true;
         }
@@ -159,7 +199,6 @@ public class MovementSystem
         // Não dá pra avançar. Frágil quebra (e libera a célula); o resto fica travado.
         if (box.Type == BoxType.Fragile)
         {
-            record.Add(MoveStep.Broke(boxEntity.Value));
             BreakBox(boxEntity.Value);
             return true;
         }

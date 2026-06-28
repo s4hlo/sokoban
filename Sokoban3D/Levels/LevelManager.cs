@@ -220,15 +220,14 @@ public class LevelManager
         }
 
         // Estado inicial das placas: uma peça pode já nascer sobre uma placa (inverte o bloco).
-        PressurePlateSystem.Resolve(session, new List<MoveStep>());
+        PressurePlateSystem.Resolve(session);
     }
 
     /// <summary>
     /// Volta todas as peças à posição inicial (R). Em vez de destruir/recriar entidades,
     /// reposiciona as existentes — assim os handles de Entity continuam válidos e o undo (Z)
-    /// consegue reverter o próprio restart. Antes de reposicionar, empilha um snapshot do
-    /// estado atual de TODAS as peças (inclui a caixa permanente/verde e frágeis quebradas),
-    /// que é justamente o conjunto que o restart afeta — diferente de um movimento normal.
+    /// consegue reverter o próprio restart. Antes de reposicionar, grava o restart como um turno
+    /// no histórico de cada peça (o conjunto que o restart afeta).
     /// </summary>
     public void Restart(GameWorld session)
     {
@@ -236,27 +235,21 @@ public class LevelManager
             return;
 
         var history = session.History;
-        var snapshot = new List<MoveStep>();
         var query = new QueryDescription().WithAll<GridPosition, SpawnPosition>();
 
-        // 1) Snapshot do restart como passos de MOVIMENTO: cada peça vai da posição atual até o
-        //    spawn (delta = spawn - atual), e a caixa que estava quebrada será re-solidificada
+        // 1) Grava o restart como um movimento na pilha de cada peça: ela vai da posição atual até
+        //    o spawn (delta = spawn - atual), e a caixa que estava quebrada será re-solidificada
         //    (SolidChange.Gained, pra o undo voltar a quebrá-la). A verde NÃO entra: o undo nunca
         //    a reverte (só o R a reposiciona); ao desfazer um R, tudo volta ao pré-R, mas a verde
-        //    fica no spawn.
+        //    fica no spawn. Toggles também não — solidez deles é derivada das placas, fora do undo.
         session.World.Query(in query, (Entity e, ref GridPosition pos, ref SpawnPosition spawn) =>
         {
             if (session.World.Has<Box>(e) && session.World.Get<Box>(e).Type == BoxType.Permanent)
                 return;
 
             var change = session.World.Has<Solid>(e) ? SolidChange.None : SolidChange.Gained;
-            snapshot.Add(new MoveStep(e, spawn.X - pos.X, spawn.Y - pos.Y, spawn.Z - pos.Z, change));
+            history.Record(e, new Move(spawn.X - pos.X, spawn.Y - pos.Y, spawn.Z - pos.Z, change));
         });
-
-        // Toggles NÃO entram no snapshot: sua solidez é estado derivado das placas, nunca
-        // gravado no histórico. O undo do restart restaura as posições e o próprio Undo
-        // re-deriva os toggles a partir delas (ver History.Undo / PressurePlateSystem).
-        history.Push(snapshot);
 
         // 2) Reposiciona cada peça pro spawn e reconstrói o grid do zero. O player deixa
         //    de estar "caído".

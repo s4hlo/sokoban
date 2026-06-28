@@ -1,162 +1,148 @@
 using System.Collections.Generic;
 using Arch.Core;
 using Sokoban3D.ECS.Components;
-using Sokoban3D.ECS.Systems;
 
 namespace Sokoban3D.Core;
 
 /// <summary>
-/// Mudança de solidez que um passo causou no grid, pra o undo desfazer na direção oposta.
-/// Quase todo passo é só movimento (<see cref="None"/>); os dois casos com mudança de tag
-/// <see cref="Solid"/> são a frágil que quebra e a caixa quebrada que o restart re-solidifica.
+/// Mudança de solidez que um movimento causou, pra o undo desfazer na direção oposta.
+/// Quase todo movimento é só deslocamento (<see cref="None"/>); os casos com tag <see cref="Solid"/>
+/// são a frágil que quebra (<see cref="Lost"/>) e a caixa quebrada que o restart re-solidifica
+/// (<see cref="Gained"/>).
 /// </summary>
 public enum SolidChange : byte
 {
-    None,   // o passo não mexeu no tag Solid
-    Lost,   // o passo TIROU o Solid (frágil quebrou). Undo readiciona o Solid.
-    Gained, // o passo ADICIONOU o Solid (restart re-solidifica uma quebrada). Undo remove o Solid.
+    None,   // não mexeu no tag Solid
+    Lost,   // TIROU o Solid (frágil quebrou). Undo readiciona.
+    Gained, // ADICIONOU o Solid (restart re-solidifica). Undo remove.
 }
 
 /// <summary>
-/// Um passo atômico de uma ação: o MOVIMENTO de UMA peça — o deslocamento <c>(Dx,Dy,Dz)</c> —
-/// e a mudança de solidez que ele causou. O undo desfaz o passo: move a peça por <c>-(delta)</c>
-/// e inverte a solidez. Guardar MOVIMENTO (e não posição absoluta) é o que deixa o undo ser um
-/// replay reverso simples: cada passo é desfeito relativo à posição atual, então peças fora do
-/// histórico (caixa verde, peça commitada numa placa atemporal) não precisam ser reconciliadas —
-/// elas simplesmente não têm passos pra desfazer.
+/// O que UMA peça fez num turno: o deslocamento líquido <c>(Dx,Dy,Dz)</c> (movimento + queda
+/// somados) e a mudança de solidez. Deslocamento zero e <see cref="SolidChange.None"/> é a
+/// "inércia" — a peça não fez nada naquele turno, mas grava mesmo assim pra manter as pilhas de
+/// todas as peças alinhadas (mesma altura = mesmo turno no topo). O undo desfaz movendo por
+/// <c>-(delta)</c> e invertendo a solidez.
 /// </summary>
-public readonly struct MoveStep
+public readonly struct Move
 {
-    public readonly Entity Entity;
     public readonly int Dx;
     public readonly int Dy;
     public readonly int Dz;
     public readonly SolidChange Solid;
 
-    public MoveStep(Entity entity, int dx, int dy, int dz, SolidChange solid = SolidChange.None)
+    public Move(int dx, int dy, int dz, SolidChange solid = SolidChange.None)
     {
-        Entity = entity;
         Dx = dx;
         Dy = dy;
         Dz = dz;
         Solid = solid;
     }
-
-    /// <summary>Passo de movimento puro: a peça foi de <paramref name="from"/> para <paramref name="to"/>.</summary>
-    public static MoveStep Moved(Entity e, GridPosition from, GridPosition to)
-        => new(e, to.X - from.X, to.Y - from.Y, to.Z - from.Z);
-
-    /// <summary>Passo de quebra: a peça (frágil) perdeu o Solid sem se mover.</summary>
-    public static MoveStep Broke(Entity e) => new(e, 0, 0, 0, SolidChange.Lost);
 }
 
 /// <summary>
-/// Histórico de ações pra desfazer (undo). Cada ação é a lista ordenada dos passos (movimentos)
-/// que aconteceram naquele turno — player, caixas empurradas, quedas por gravidade, quebras de
-/// frágil. A caixa verde nunca entra. Um Z desfaz a última ação inteira, em replay reverso.
+/// Histórico de undo: uma pilha de movimentos POR PEÇA. Cada turno, toda peça com histórico
+/// empilha um <see cref="Move"/> (o que fez, ou inércia se ficou parada) — então as pilhas crescem
+/// juntas e ficam alinhadas por turno. Um Z popa o topo de CADA pilha e executa o movimento
+/// oposto. A caixa verde (<see cref="BoxType.Permanent"/>) simplesmente nunca empilha; a placa
+/// atemporal (<see cref="TimelessBase"/>) limpa a pilha de quem pisa nela via <see cref="Forget"/>.
+///
+/// O histórico só conhece MOVIMENTO de peça. Estado derivado (a solidez dos blocos
+/// <see cref="Toggle"/>, função das placas) não passa por aqui — quem o reconstrói é o
+/// <see cref="Systems.PressurePlateSystem"/> no fluxo normal, depois que o undo restaura posições.
 /// </summary>
 public class History
 {
-    private readonly Stack<List<MoveStep>> _stack = new();
+    private readonly Dictionary<Entity, Stack<Move>> _stacks = new();
 
-    public void Push(List<MoveStep> steps) => _stack.Push(steps);
+    /// <summary>Empilha o movimento do turno na pilha da peça (criando a pilha na primeira vez).</summary>
+    public void Record(Entity entity, Move move)
+    {
+        if (!_stacks.TryGetValue(entity, out var stack))
+        {
+            stack = new Stack<Move>();
+            _stacks[entity] = stack;
+        }
+        stack.Push(move);
+    }
 
-    public void Clear() => _stack.Clear();
+    public void Clear() => _stacks.Clear();
 
     /// <summary>
-    /// Apaga TODO o histórico passado de uma peça: remove os passos dela de todas as ações da
-    /// pilha (ações que ficam vazias são descartadas). A peça nunca mais é revertida por um Z
-    /// futuro — fica "commitada" na posição atual. É isso que a placa atemporal
-    /// (<see cref="TimelessBase"/>) faz com quem pisa nela.
-    ///
-    /// É um expurgo único do passado, NÃO um flag persistente: a peça não ganha marca nenhuma,
-    /// então assim que ela voltar a se mover (ex.: sair da placa) o próximo passo já é gravado de
-    /// novo. Difere da caixa verde (<see cref="BoxType.Permanent"/>), que ignora o undo pra sempre.
+    /// Esvazia a pilha de uma peça: ela fica "commitada" na posição atual e o undo não a reverte
+    /// mais (até onde foi limpa). É o que a placa atemporal faz com quem pisa nela. Como a peça
+    /// continua empilhando nos turnos seguintes, o topo dela permanece alinhado com o turno atual;
+    /// só o passado profundo some.
     /// </summary>
     public void Forget(Entity entity)
     {
-        if (_stack.Count == 0)
-            return;
-
-        // Stack não dá pra editar no meio: despeja num array (topo→base), filtra e repõe.
-        var actions = _stack.ToArray(); // [0] = topo
-        _stack.Clear();
-        for (int i = actions.Length - 1; i >= 0; i--) // base→topo, pra repor a ordem original
-        {
-            var action = actions[i];
-            action.RemoveAll(s => s.Entity == entity);
-            if (action.Count > 0)
-                _stack.Push(action);
-        }
+        if (_stacks.TryGetValue(entity, out var stack))
+            stack.Clear();
     }
 
     /// <summary>
-    /// Desfaz a última ação. Replay reverso: cada passo é desfeito de trás pra frente, movendo a
-    /// peça por -(delta) como um movimento NORMAL — libera a célula atual e ocupa a de volta só se
-    /// estiver livre. Se algo fora do histórico (caixa verde, peça commitada numa placa) estiver
-    /// na célula de volta, o movimento é bloqueado e a peça fica onde está — exatamente como
-    /// qualquer movimento contra célula ocupada, sem tratamento especial. No fim re-deriva os
-    /// toggles pelas placas. Retorna false se não há o que desfazer.
+    /// Desfaz o último turno: popa o topo da pilha de cada peça e a move por <c>-(delta)</c>
+    /// (invertendo a solidez). Peças com pilha vazia ficam paradas (já estão commitadas). Move
+    /// como movimento normal — se a célula de volta estiver ocupada por algo que não foi revertido,
+    /// a peça fica onde está. Retorna false se nada havia pra desfazer.
     /// </summary>
     public bool Undo(GameWorld world)
     {
-        if (_stack.Count == 0)
-            return false;
-
-        var steps = _stack.Pop();
-
-        for (int i = steps.Count - 1; i >= 0; i--)
+        bool undone = false;
+        foreach (var (entity, stack) in _stacks)
         {
-            var s = steps[i];
-            var cur = world.World.Get<GridPosition>(s.Entity);
-            var target = new GridPosition(cur.X - s.Dx, cur.Y - s.Dy, cur.Z - s.Dz);
+            if (stack.Count == 0)
+                continue;
 
-            switch (s.Solid)
-            {
-                case SolidChange.Lost:
-                    // O passo tirou o Solid (frágil quebrou, sem mover): readiciona e reocupa a
-                    // própria célula (livre nesta altura do replay).
-                    world.World.Set(s.Entity, target);
-                    world.World.Add(s.Entity, new Solid());
-                    world.Occupy(s.Entity);
-                    break;
-
-                case SolidChange.Gained:
-                    // O passo adicionou o Solid (restart re-solidificou) e moveu: desocupa, tira o
-                    // Solid e volta a posição sem reocupar (fica quebrada de novo).
-                    world.Vacate(s.Entity);
-                    world.World.Remove<Solid>(s.Entity);
-                    world.World.Set(s.Entity, target);
-                    break;
-
-                default:
-                    // Movimento puro. Peça que não ocupa o grid: só a posição lógica.
-                    if (!world.World.Has<Solid>(s.Entity))
-                    {
-                        world.World.Set(s.Entity, target);
-                        break;
-                    }
-                    // Move respeitando a ocupação (regra normal de qualquer movimento): libera a
-                    // célula atual e só ocupa a de volta se ela estiver livre; senão fica parada.
-                    world.Vacate(s.Entity);
-                    if (world.Grid.IsValid(target.X, target.Y, target.Z)
-                        && !world.Grid.IsOccupied(target.X, target.Y, target.Z))
-                    {
-                        world.World.Set(s.Entity, target);
-                        world.Occupy(s.Entity);
-                    }
-                    else
-                    {
-                        world.Occupy(s.Entity); // bloqueado: reocupa a célula atual
-                    }
-                    break;
-            }
+            undone = true;
+            ApplyReverse(world, entity, stack.Pop());
         }
+        return undone;
+    }
 
-        // Toggles são estado derivado (nunca no histórico): re-deriva pelas placas no estado
-        // restaurado. Record descartável — nada daqui é gravado.
-        PressurePlateSystem.Resolve(world, new List<MoveStep>());
+    private static void ApplyReverse(GameWorld world, Entity entity, Move m)
+    {
+        var cur = world.World.Get<GridPosition>(entity);
+        var target = new GridPosition(cur.X - m.Dx, cur.Y - m.Dy, cur.Z - m.Dz);
 
-        return true;
+        switch (m.Solid)
+        {
+            case SolidChange.Lost:
+                // O turno tirou o Solid (frágil quebrou): readiciona e reocupa a célula.
+                world.World.Set(entity, target);
+                world.World.Add(entity, new Solid());
+                world.Occupy(entity);
+                break;
+
+            case SolidChange.Gained:
+                // O turno adicionou o Solid (restart re-solidificou): desocupa, tira o Solid e
+                // volta a posição sem reocupar (fica quebrada de novo).
+                world.Vacate(entity);
+                world.World.Remove<Solid>(entity);
+                world.World.Set(entity, target);
+                break;
+
+            default:
+                // Movimento puro. Peça que não ocupa o grid: só a posição lógica.
+                if (!world.World.Has<Solid>(entity))
+                {
+                    world.World.Set(entity, target);
+                    break;
+                }
+                // Move respeitando a ocupação: libera a célula atual e só ocupa a de volta se ela
+                // estiver livre; senão fica parada.
+                world.Vacate(entity);
+                if (world.Grid.IsValid(target.X, target.Y, target.Z)
+                    && !world.Grid.IsOccupied(target.X, target.Y, target.Z))
+                {
+                    world.World.Set(entity, target);
+                    world.Occupy(entity);
+                }
+                else
+                {
+                    world.Occupy(entity);
+                }
+                break;
+        }
     }
 }

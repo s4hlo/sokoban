@@ -132,6 +132,9 @@ public class Game1 : Game
             if (Active.History.Undo(Active))
             {
                 Active.PlayerFell = false;
+                // O undo só restaura posições de peça. A solidez dos toggles é derivada das placas:
+                // re-deriva a partir do estado restaurado (o histórico é agnóstico a toggle).
+                PressurePlateSystem.Resolve(Active);
                 // Undo é instantâneo: encaixa o visual na hora, sem deslizar de volta.
                 _animationSystem.SnapAll(Active);
             }

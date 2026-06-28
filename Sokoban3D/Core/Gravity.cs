@@ -10,13 +10,13 @@ namespace Sokoban3D.Core;
 /// Processa de baixo pra cima pra que apoios assentem antes do que está sobre eles.
 ///
 /// É usada tanto pelo empurrão do player (<see cref="ECS.Systems.MovementSystem"/>) quanto
-/// pelo bloco que some sob uma peça (<see cref="ECS.Systems.PressurePlateSystem"/>). Cada queda
-/// vira um passo de movimento próprio no <paramref name="record"/> da ação (deslocamento só no
-/// eixo Y), pra um único undo desfazer movimento + queda no mesmo replay reverso.
+/// pelo bloco que some sob uma peça (<see cref="ECS.Systems.PressurePlateSystem"/>). A queda só
+/// muda a célula da peça; o histórico de undo captura o deslocamento líquido do turno por conta
+/// própria (snapshot antes/depois), então a gravidade não grava nada.
 /// </summary>
 public static class Gravity
 {
-    public static void Apply(GameWorld world, List<Entity> movers, List<MoveStep> record)
+    public static void Apply(GameWorld world, List<Entity> movers)
     {
         // Assenta de baixo pra cima: o apoio pousa antes do que repousa sobre ele.
         movers.Sort((a, b) =>
@@ -36,7 +36,6 @@ public static class Gravity
                 continue;
 
             var to = new GridPosition(pos.X, ny, pos.Z);
-            record.Add(MoveStep.Moved(e, pos, to));
             world.Move(e, to);
         }
     }

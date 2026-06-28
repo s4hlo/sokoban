@@ -45,12 +45,6 @@ public static class BoxRules
         BoxType.Permanent => 0, // mesmo peso da leve (empurra de graça)
         _ => 1,
     };
-
-    /// <summary>
-    /// True se a caixa não deve ser registrada no histórico de undo: ela se move
-    /// normalmente, mas o undo não a reverte — só o restart (R) volta à posição inicial.
-    /// </summary>
-    public static bool IgnoresUndo(BoxType type) => type == BoxType.Permanent;
 }
 
 /// <summary>
