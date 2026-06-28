@@ -136,8 +136,6 @@ public class Game1 : Game
             if (Active.History.Undo(Active))
             {
                 Active.PlayerFell = false;
-                // O reverso só mexe em posição; a solidez dos toggles é derivada das placas.
-                PressurePlateSystem.Resolve(Active);
                 _animationSystem.SnapAll(Active);
             }
         }
@@ -146,6 +144,11 @@ public class Game1 : Game
             _navigator.SuspendActive();
 
         _movementSystem.Update(Active, keyboard);
+
+        // Placas de pressão são estado derivado da posição das peças: re-deriva todo frame,
+        // independente do que mexeu nas posições (movimento, undo ou nada).
+        PressurePlateSystem.Resolve(Active);
+
         _animationSystem.Update(Active, (float)gameTime.ElapsedGameTime.TotalSeconds);
 
         // Pisar na meta CONCLUI o nível: volta pro pai e reseta este nível (próxima visita

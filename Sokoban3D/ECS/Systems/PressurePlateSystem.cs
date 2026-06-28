@@ -14,12 +14,11 @@ namespace Sokoban3D.ECS.Systems;
 /// inverte seu <see cref="Toggle.SolidByDefault"/>.
 ///
 /// É autoridade única sobre o tag <see cref="Solid"/> dos toggles. A solidez do toggle é estado
-/// puramente DERIVADO das placas — não tem pilha, não entra no histórico, o undo é totalmente
-/// agnóstico a ela. Esta Resolve é a ÚNICA dona desse estado: roda no fim de cada movimento, no
-/// load, no restart e depois de um undo (o undo só restaura as posições das peças; o
-/// <see cref="Game1"/> chama esta Resolve em seguida pra re-derivar os toggles a partir do estado
-/// restaurado). A queda das peças que repousavam sobre um bloco que sumiu é movimento real e é
-/// capturada pelo histórico via snapshot do turno, não por aqui.
+/// puramente DERIVADO das placas — não tem pilha, não entra no histórico. O <see cref="Game1"/>
+/// roda esta Resolve todo frame, então os toggles seguem a posição atual das peças seja qual for a
+/// causa (movimento, undo ou nada); o histórico nem sabe que toggles existem. Dentro de um turno de
+/// movimento ela também roda antes do commit, pra que a queda causada por um bloco que sumiu entre
+/// no histórico como movimento real, não por aqui.
 /// </summary>
 public static class PressurePlateSystem
 {
