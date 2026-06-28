@@ -242,10 +242,9 @@ public class LevelManager
     }
 
     /// <summary>
-    /// Volta todas as peças à posição inicial (R). Em vez de destruir/recriar entidades,
-    /// reposiciona as existentes — assim os handles de Entity continuam válidos e o undo (Z)
-    /// consegue reverter o próprio restart. Antes de reposicionar, grava o restart como um turno
-    /// no histórico de cada peça (o conjunto que o restart afeta).
+    /// Volta todas as peças à posição inicial (R). Reposiciona as entidades existentes em vez de
+    /// destruir/recriar — os handles de Entity seguem válidos, então o reverso (Z) desfaz o próprio
+    /// restart, gravado como um turno no histórico antes de reposicionar.
     /// </summary>
     public void Restart(GameWorld session)
     {
@@ -255,11 +254,9 @@ public class LevelManager
         var history = session.History;
         var query = new QueryDescription().WithAll<GridPosition, SpawnPosition>();
 
-        // 1) Grava o restart como um movimento na pilha de cada peça: ela vai da posição atual até
-        //    o spawn (delta = spawn - atual), e a caixa que estava quebrada será re-solidificada
-        //    (SolidChange.Gained, pra o undo voltar a quebrá-la). A verde NÃO entra: o undo nunca
-        //    a reverte (só o R a reposiciona); ao desfazer um R, tudo volta ao pré-R, mas a verde
-        //    fica no spawn. Toggles também não — solidez deles é derivada das placas, fora do undo.
+        // 1) Grava o restart como um movimento (delta = spawn - atual). Caixa quebrada vira
+        //    SolidChange.Gained, pra o reverso voltar a quebrá-la. A verde não entra (só o R a move);
+        //    toggles também não (solidez derivada das placas).
         session.World.Query(in query, (Entity e, ref GridPosition pos, ref SpawnPosition spawn) =>
         {
             if (session.World.Has<Box>(e) && session.World.Get<Box>(e).Type == BoxType.Permanent)

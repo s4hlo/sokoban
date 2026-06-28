@@ -121,8 +121,7 @@ public class Game1 : Game
             return;
         }
 
-        // Undo/restart funcionam em qualquer nível — cada sessão tem seu próprio histórico.
-        // T = suspender: sai pro pai PRESERVANDO este nível (volta exatamente onde parou).
+        // Reverso/restart funcionam em qualquer nível — cada sessão tem seu próprio histórico.
         if (Pressed(keyboard, Keys.F))
         {
             // Reset total: descarta tudo e recarrega o nível do zero (entidades, grid e histórico).
@@ -133,18 +132,16 @@ public class Game1 : Game
             _levelManager.Restart(Active);
         else if (Pressed(keyboard, Keys.Z))
         {
-            // Desfaz a última ação. Se o player estava caído, o undo o traz de volta a uma
-            // posição segura — então deixa de estar congelado.
+            // Move as peças na direção oposta do último turno. Tira o player do estado caído.
             if (Active.History.Undo(Active))
             {
                 Active.PlayerFell = false;
-                // O undo só restaura posições de peça. A solidez dos toggles é derivada das placas:
-                // re-deriva a partir do estado restaurado (o histórico é agnóstico a toggle).
+                // O reverso só mexe em posição; a solidez dos toggles é derivada das placas.
                 PressurePlateSystem.Resolve(Active);
-                // Undo é instantâneo: encaixa o visual na hora, sem deslizar de volta.
                 _animationSystem.SnapAll(Active);
             }
         }
+        // T = suspender: sai pro pai preservando este nível (volta exatamente onde parou).
         else if (Pressed(keyboard, Keys.T))
             _navigator.SuspendActive();
 

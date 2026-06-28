@@ -60,9 +60,8 @@ public class MovementSystem
         if (!_world.Grid.IsValid(targetX, pos.Y, targetZ))
             return;
 
-        // Snapshot do estado (posição + solidez) de toda peça com histórico ANTES de mutar o
-        // mundo. O turno só é confirmado se o player de fato se mover; aí o histórico grava o
-        // deslocamento líquido de cada peça (snapshot vs estado final), inclusive inércia.
+        // Estado de cada peça ANTES de mutar o mundo. Se o player de fato se mover, o CommitTurn
+        // grava o deslocamento líquido de cada uma (final menos isto).
         var before = Snapshot();
 
         if (_world.Grid.IsOccupied(targetX, pos.Y, targetZ))
@@ -83,12 +82,9 @@ public class MovementSystem
         // repousava sobre um que sumiu). Pode congelar o player (bloco aparecendo nele).
         PressurePlateSystem.Resolve(_world);
 
-        // Fecha o turno: grava o que cada peça fez (ou inércia) na pilha dela.
         CommitTurn(before);
 
-        // Placa atemporal: toda peça que terminou o turno sobre uma TimelessBase tem a pilha
-        // esvaziada — fica "commitada" ali (inclui o movimento que a levou até a placa, já gravado
-        // acima). Sair da placa volta a empilhar normalmente.
+        // Placa atemporal: quem terminou o turno sobre uma TimelessBase tem a pilha esvaziada.
         foreach (var e in before.Keys)
         {
             var p = _world.World.Get<GridPosition>(e);
@@ -103,8 +99,8 @@ public class MovementSystem
     }
 
     /// <summary>
-    /// Estado (posição + se ocupa o grid) de cada peça com histórico — player, caixas, inimigos —
-    /// no início do turno. A caixa verde é excluída: ela nunca tem histórico (só o R a reverte).
+    /// Posição + solidez de cada peça reversível (player, caixas, inimigos) no início do turno.
+    /// A caixa verde é excluída: nunca empilha (só o R a reverte).
     /// </summary>
     private Dictionary<Entity, (GridPosition Pos, bool Solid)> Snapshot()
     {
@@ -120,9 +116,8 @@ public class MovementSystem
     }
 
     /// <summary>
-    /// Grava na pilha de cada peça o que ela fez neste turno: o deslocamento líquido (final menos
-    /// inicial) e a mudança de solidez. Toda peça grava — quem não se mexeu grava inércia —, o que
-    /// mantém as pilhas alinhadas por turno.
+    /// Grava o deslocamento líquido + mudança de solidez de cada peça neste turno. Quem ficou parado
+    /// grava inércia (delta zero), mantendo as pilhas alinhadas por turno.
     /// </summary>
     private void CommitTurn(Dictionary<Entity, (GridPosition Pos, bool Solid)> before)
     {

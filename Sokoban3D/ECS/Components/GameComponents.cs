@@ -17,13 +17,12 @@ public enum BoxType
     Medium,  // média: o player empurra até duas em fila
     Heavy,   // pesada: só uma por vez
     Fragile, // frágil: empurra como leve, mas quebra se for contra algo que não move
-    Permanent, // verde: empurra como leve, mas o undo não a reverte (só o R volta ela)
+    Permanent, // verde: empurra como leve, mas o reverso não a desfaz (só o R volta ela)
 }
 
 /// <summary>
-/// Marca uma entity como caixa, com seu tipo. Uma caixa quebrada (frágil destruída) perde
-/// o tag <see cref="Solid"/> — deixa de ocupar o grid e de ser desenhada —, mas a entity
-/// persiste pra que o undo consiga reverter a quebra (readicionando o <see cref="Solid"/>).
+/// Marca uma entity como caixa, com seu tipo. Uma frágil quebrada perde o tag <see cref="Solid"/>,
+/// mas a entity persiste pra o reverso conseguir re-solidificá-la.
 /// </summary>
 public struct Box
 {
@@ -49,9 +48,8 @@ public static class BoxRules
 
 /// <summary>
 /// Tag: a entity ocupa uma célula do grid (player, caixa não-quebrada, inimigo, obstáculo).
-/// É a ÚNICA fonte de verdade sobre ocupação no nível do ECS — "essa peça ocupa o grid?"
-/// é sempre <c>World.Has&lt;Solid&gt;(e)</c>. Quebrar uma frágil remove o tag; o undo o
-/// readiciona. Objetivos e portais NÃO têm Solid (o player precisa pisar em cima).
+/// É a ÚNICA fonte de verdade no ECS sobre ocupação — "ocupa o grid?" é <c>World.Has&lt;Solid&gt;(e)</c>.
+/// Objetivos e portais NÃO têm Solid (o player precisa pisar em cima).
 /// </summary>
 public struct Solid
 {
@@ -78,13 +76,10 @@ public struct Objective
 }
 
 /// <summary>
-/// Base atemporal: marcador de célula (não ocupa o grid) que APAGA o histórico de quem pisa
-/// nela. Quando uma peça (player ou caixa) termina um passo sobre a base, o histórico passado
-/// daquela peça é expurgado (<see cref="Core.History.Forget"/>) — ela fica "commitada" ali e o
-/// undo não a reverte mais (inclui o passo que a levou até a base). É um expurgo único do
-/// passado, não um flag: sair da base e se mover volta a gravar histórico normalmente. Difere
-/// da caixa <see cref="BoxType.Permanent"/> (verde), que ignora o undo pra sempre: aqui o efeito
-/// é da CÉLULA, momentâneo, adquirido por quem pisa nela.
+/// Base atemporal: marcador de célula (não ocupa o grid) que esvazia a pilha de quem termina um
+/// passo sobre ela (<see cref="Core.History.Forget"/>) — a peça fica commitada ali. É um expurgo
+/// único do passado, não um flag: sair e se mover volta a empilhar. Difere da caixa
+/// <see cref="BoxType.Permanent"/> (verde), que ignora o reverso pra sempre — aqui o efeito é da célula.
 /// </summary>
 public struct TimelessBase
 {
@@ -129,9 +124,8 @@ public struct PressurePlate
 /// repouso (nenhuma placa pressionada): true = porta presente que SOME ao pisar; false = ponte
 /// ausente que APARECE ao pisar. Pressionada qualquer placa do grupo, o estado inverte.
 /// Quando sólido, ganha o tag <see cref="Solid"/> e ocupa o grid (igual a um obstáculo); quando
-/// aberto, perde o tag e some. Essa solidez é estado DERIVADO das placas e NUNCA entra no
-/// histórico de undo — o undo restaura as posições e re-deriva os toggles pelas placas (ver
-/// <see cref="Core.History.Undo"/> / <see cref="Systems.PressurePlateSystem"/>).
+/// aberto, perde o tag e some. Essa solidez é estado DERIVADO das placas e NUNCA entra no histórico:
+/// o reverso devolve as posições e o <see cref="Systems.PressurePlateSystem"/> re-deriva os toggles.
 ///
 /// <see cref="Threshold"/> é quantas placas do grupo precisam estar pressionadas ao mesmo tempo
 /// pra o bloco acionar: 1 = qualquer placa (lógica OR); igual ao total de placas do grupo = só
@@ -153,9 +147,8 @@ public struct Enemy
 }
 
 /// <summary>
-/// Célula inicial (spawn) da peça no grid. Guardada na própria entity pra que o
-/// restart (R) consiga reposicioná-la sem destruir/recriar — mantendo o mesmo
-/// handle de Entity válido, o que permite o undo reverter o próprio restart.
+/// Célula inicial (spawn) da peça. Guardada na entity pra o restart (R) reposicioná-la sem
+/// destruir/recriar — o handle de Entity segue válido, então o reverso desfaz o próprio restart.
 /// </summary>
 public struct SpawnPosition
 {
