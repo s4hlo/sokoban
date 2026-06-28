@@ -17,7 +17,7 @@ public enum BoxType
     Medium,  // média: o player empurra até duas em fila
     Heavy,   // pesada: só uma por vez
     Fragile, // frágil: empurra como leve, mas quebra se for contra algo que não move
-    Permanent, // verde: empurra como pesada, mas o undo não a reverte (só o R volta ela)
+    Permanent, // verde: empurra como leve, mas o undo não a reverte (só o R volta ela)
 }
 
 /// <summary>
@@ -42,7 +42,7 @@ public static class BoxRules
         BoxType.Medium => 1,
         BoxType.Heavy => 2,
         BoxType.Fragile => 0,
-        BoxType.Permanent => 2, // mesmo peso da pesada
+        BoxType.Permanent => 0, // mesmo peso da leve (empurra de graça)
         _ => 1,
     };
 
@@ -84,11 +84,13 @@ public struct Objective
 }
 
 /// <summary>
-/// Base atemporal: marcador de célula (não ocupa o grid) que "congela" o undo de quem está
-/// na sua célula. No momento do Z, qualquer peça (player ou caixa) cuja célula atual tenha uma
-/// base atemporal NÃO é revertida — todo o resto volta; sair da base volta a ser reversível
-/// (decisão dinâmica, tomada na hora do undo). Difere da caixa <see cref="BoxType.Permanent"/>
-/// (verde), que ignora o undo por si só: aqui o efeito é da CÉLULA, adquirido por quem pisa nela.
+/// Base atemporal: marcador de célula (não ocupa o grid) que APAGA o histórico de quem pisa
+/// nela. Quando uma peça (player ou caixa) termina um passo sobre a base, o histórico passado
+/// daquela peça é expurgado (<see cref="Core.History.Forget"/>) — ela fica "commitada" ali e o
+/// undo não a reverte mais (inclui o passo que a levou até a base). É um expurgo único do
+/// passado, não um flag: sair da base e se mover volta a gravar histórico normalmente. Difere
+/// da caixa <see cref="BoxType.Permanent"/> (verde), que ignora o undo pra sempre: aqui o efeito
+/// é da CÉLULA, momentâneo, adquirido por quem pisa nela.
 /// </summary>
 public struct TimelessBase
 {
@@ -133,8 +135,9 @@ public struct PressurePlate
 /// repouso (nenhuma placa pressionada): true = porta presente que SOME ao pisar; false = ponte
 /// ausente que APARECE ao pisar. Pressionada qualquer placa do grupo, o estado inverte.
 /// Quando sólido, ganha o tag <see cref="Solid"/> e ocupa o grid (igual a um obstáculo); quando
-/// aberto, perde o tag e some — exatamente como uma caixa frágil quebrada, então o undo o
-/// reverte pela mesma máquina (<see cref="Core.EntityState.WasSolid"/>).
+/// aberto, perde o tag e some. Essa solidez é estado DERIVADO das placas e NUNCA entra no
+/// histórico de undo — o undo restaura as posições e re-deriva os toggles pelas placas (ver
+/// <see cref="Core.History.Undo"/> / <see cref="Systems.PressurePlateSystem"/>).
 ///
 /// <see cref="Threshold"/> é quantas placas do grupo precisam estar pressionadas ao mesmo tempo
 /// pra o bloco acionar: 1 = qualquer placa (lógica OR); igual ao total de placas do grupo = só

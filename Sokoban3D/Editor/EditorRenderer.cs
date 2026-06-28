@@ -191,7 +191,7 @@ public class EditorRenderer
         EditorBrush.Portal => $"Portal -> nivel {editor.PortalTarget}",
         EditorBrush.Plate => $"Placa (grupo {editor.Group})",
         EditorBrush.Toggle => $"Toggle (grupo {editor.Group}, {(editor.ToggleSolidByDefault ? "some ao pisar" : "aparece ao pisar")}, precisa {editor.ToggleThreshold} placa(s))",
-        EditorBrush.TimelessBase => "Base atemporal (congela o undo de quem pisa)",
+        EditorBrush.TimelessBase => "Base atemporal (apaga o historico de quem pisa)",
         var b => b.ToString(),
     };
 

@@ -6,8 +6,9 @@
     [4, 1, 7]
   ],
   "Boxes": [
-    [2, 1, 7, "Heavy"],
-    [3, 1, 7, "Permanent"]
+    [3, 1, 7, "Permanent"],
+    [2, 1, 7, "Light"],
+    [3, 1, 6, "Light"]
   ],
   "Objectives": [
     [1, 1, 1]

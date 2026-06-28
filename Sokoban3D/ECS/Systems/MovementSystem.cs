@@ -60,7 +60,7 @@ public class MovementSystem
         if (!_world.Grid.IsValid(targetX, pos.Y, targetZ))
             return;
 
-        var record = new List<EntityState>();
+        var record = new List<MoveStep>();
 
         if (_world.Grid.IsOccupied(targetX, pos.Y, targetZ))
         {
@@ -69,8 +69,9 @@ public class MovementSystem
                 return;
         }
 
-        record.Add(new EntityState(player, pos, _world.World.Has<Solid>(player)));
-        _world.Move(player, new GridPosition(targetX, pos.Y, targetZ));
+        var playerTo = new GridPosition(targetX, pos.Y, targetZ);
+        record.Add(MoveStep.Moved(player, pos, playerTo));
+        _world.Move(player, playerTo);
 
         // Gravidade: toda peça que se moveu (player + caixas empurradas) cai até pousar.
         // A queda faz parte da MESMA ação no histórico — as posições anteriores já estão
@@ -84,6 +85,17 @@ public class MovementSystem
 
         _history.Push(record);
 
+        // Placa atemporal: toda peça (player ou caixa) que terminou o passo sobre uma
+        // TimelessBase tem seu histórico expurgado — fica "commitada" ali, o undo não a reverte
+        // mais. Inclui o próprio passo que a levou até a placa. Sair da placa volta a gravar
+        // normalmente (Forget só apaga o passado; não é flag persistente).
+        foreach (var mover in MoversFrom(record))
+        {
+            var p = _world.World.Get<GridPosition>(mover);
+            if (_world.Spatial.CellWith<TimelessBase>(p.X, p.Y, p.Z) is not null)
+                _history.Forget(mover);
+        }
+
         // Player que repousou em y==0 está apoiado só pelo chão-morte: caiu, congela.
         var landed = _world.World.Get<GridPosition>(player);
         if (landed.Y == 0)
@@ -91,7 +103,7 @@ public class MovementSystem
     }
 
     /// <summary>Peças distintas que ocupam o grid dentre as afetadas pela ação (candidatas a cair).</summary>
-    private List<Entity> MoversFrom(List<EntityState> affected)
+    private List<Entity> MoversFrom(List<MoveStep> affected)
     {
         var movers = new List<Entity>();
         foreach (var s in affected)
@@ -105,7 +117,7 @@ public class MovementSystem
     /// livre (estava vazia, a caixa foi empurrada, ou a caixa frágil quebrou).
     /// Só causa mutações nos caminhos que terminam em sucesso.
     /// </summary>
-    private bool TryClear(int x, int y, int z, int dx, int dz, int budget, List<EntityState> record)
+    private bool TryClear(int x, int y, int z, int dx, int dz, int budget, List<MoveStep> record)
     {
         if (!_world.Grid.IsValid(x, y, z))
             return false; // parede
@@ -136,16 +148,18 @@ public class MovementSystem
         {
             // Empurra a caixa pra frente. Caixas imunes ao undo movem normalmente,
             // mas não são registradas — o undo não as reverte (só o R).
+            var from = new GridPosition(x, y, z);
+            var to = new GridPosition(aheadX, y, aheadZ);
             if (!BoxRules.IgnoresUndo(box.Type))
-                record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), true));
-            _world.Move(boxEntity.Value, new GridPosition(aheadX, y, aheadZ));
+                record.Add(MoveStep.Moved(boxEntity.Value, from, to));
+            _world.Move(boxEntity.Value, to);
             return true;
         }
 
         // Não dá pra avançar. Frágil quebra (e libera a célula); o resto fica travado.
         if (box.Type == BoxType.Fragile)
         {
-            record.Add(new EntityState(boxEntity.Value, new GridPosition(x, y, z), true));
+            record.Add(MoveStep.Broke(boxEntity.Value));
             BreakBox(boxEntity.Value);
             return true;
         }
