@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Arch.Core;
 using Sokoban3D.ECS.Components;
 
@@ -88,16 +89,31 @@ public class History
     /// </summary>
     public bool Undo(GameWorld world)
     {
-        bool undone = false;
-        foreach (var (entity, stack) in _stacks)
-        {
-            if (stack.Count == 0)
-                continue;
+        // Popa o topo de cada pilha de uma vez. Reverter peça a peça com checagem de ocupação
+        // dependia da ordem de iteração: numa cadeia empurrada (player → caixa A → caixa B) a
+        // célula de destino de uma peça é a célula ATUAL da peça à frente, então uma peça revertida
+        // cedo demais via o destino ainda ocupado e ficava parada — undo inconsistente.
+        var moves = _stacks
+            .Where(kv => kv.Value.Count > 0)
+            .Select(kv => (Entity: kv.Key, Move: kv.Value.Pop()))
+            .ToList();
 
-            undone = true;
-            ApplyReverse(world, entity, stack.Pop());
-        }
-        return undone;
+        if (moves.Count == 0)
+            return false;
+
+        // Tira do grid TODA peça sólida do lote ANTES de reposicionar qualquer uma. Como o estado
+        // pós-undo é uma configuração que já foi válida, depois de erguer o lote inteiro o destino
+        // de cada peça está livre. As únicas células ainda ocupadas são de peças FORA do lote
+        // (terreno, ou peças "esquecidas" por placa atemporal) — é só contra essas que a checagem
+        // de ocupação abaixo precisa proteger, e agora ela independe da ordem.
+        foreach (var (entity, _) in moves)
+            if (world.World.Has<Solid>(entity))
+                world.Vacate(entity);
+
+        foreach (var (entity, move) in moves)
+            ApplyReverse(world, entity, move);
+
+        return true;
     }
 
     private static void ApplyReverse(GameWorld world, Entity entity, Move m)
@@ -108,16 +124,16 @@ public class History
         switch (m.Solid)
         {
             case SolidChange.Lost:
-                // O turno tirou o Solid (frágil quebrou): readiciona e reocupa a célula.
+                // O turno tirou o Solid (frágil quebrou): estava não-sólida (não foi vacada acima),
+                // readiciona o Solid e ocupa a célula de volta.
                 world.World.Set(entity, target);
                 world.World.Add(entity, new Solid());
                 world.Occupy(entity);
                 break;
 
             case SolidChange.Gained:
-                // O turno adicionou o Solid (restart re-solidificou): desocupa, tira o Solid e
-                // volta a posição sem reocupar (fica quebrada de novo).
-                world.Vacate(entity);
+                // O turno adicionou o Solid (restart re-solidificou): já foi vacada acima; tira o
+                // Solid e volta a posição sem reocupar (fica quebrada de novo).
                 world.World.Remove<Solid>(entity);
                 world.World.Set(entity, target);
                 break;
@@ -129,9 +145,8 @@ public class History
                     world.World.Set(entity, target);
                     break;
                 }
-                // Move respeitando a ocupação: libera a célula atual e só ocupa a de volta se ela
-                // estiver livre; senão fica parada.
-                world.Vacate(entity);
+                // Sólida (já vacada acima): volta ao destino se ele estiver livre — nesse ponto só
+                // pode estar ocupado por peça fora do lote. Senão, fica onde estava (reocupa).
                 if (world.Grid.IsValid(target.X, target.Y, target.Z)
                     && !world.Grid.IsOccupied(target.X, target.Y, target.Z))
                 {

@@ -104,6 +104,10 @@ public class LevelManager
         // Remove entidades de um nível anterior (importante pra troca de nível não duplicar).
         DestroyAllEntities(session);
 
+        // Histórico zerado: um nível recém-carregado não tem nada pra desfazer. No reset total (F)
+        // é isso que apaga o undo acumulado da sessão.
+        session.History.Clear();
+
         // Ajusta o grid às dimensões do nível (realoca o mapa de ocupação zerado).
         session.Grid.Resize(level.Width, level.Height, level.Depth);
         session.PlayerFell = false;
@@ -221,6 +225,20 @@ public class LevelManager
 
         // Estado inicial das placas: uma peça pode já nascer sobre uma placa (inverte o bloco).
         PressurePlateSystem.Resolve(session);
+    }
+
+    /// <summary>
+    /// Reset total (tecla F): joga tudo fora e remonta o nível do zero a partir da receita ativa —
+    /// destrói as entidades, zera o grid e LIMPA o histórico de undo. Diferente do <see cref="Restart"/>
+    /// (R), que só reposiciona as peças existentes pra manter os handles válidos e deixar o próprio R
+    /// ser desfeito; aqui não sobra nada pra desfazer, o nível volta ao estado de primeira visita.
+    /// </summary>
+    public void FullReset(GameWorld session)
+    {
+        if (session.CurrentLevel == null)
+            return;
+
+        LoadLevel(session, session.CurrentLevel);
     }
 
     /// <summary>

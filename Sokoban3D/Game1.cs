@@ -123,7 +123,13 @@ public class Game1 : Game
 
         // Undo/restart funcionam em qualquer nível — cada sessão tem seu próprio histórico.
         // T = suspender: sai pro pai PRESERVANDO este nível (volta exatamente onde parou).
-        if (Pressed(keyboard, Keys.R))
+        if (Pressed(keyboard, Keys.F))
+        {
+            // Reset total: descarta tudo e recarrega o nível do zero (entidades, grid e histórico).
+            _levelManager.FullReset(Active);
+            _animationSystem.SnapAll(Active);
+        }
+        else if (Pressed(keyboard, Keys.R))
             _levelManager.Restart(Active);
         else if (Pressed(keyboard, Keys.Z))
         {
