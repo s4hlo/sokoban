@@ -107,41 +107,21 @@ public class History
         var cur = world.World.Get<GridPosition>(entity);
         var target = new GridPosition(cur.X - m.Dx, cur.Y - m.Dy, cur.Z - m.Dz);
 
-        switch (m.Solid)
+        // Inverte a solidez que o turno mexeu (frágil que quebrou / restart que re-solidificou).
+        if (m.Solid == SolidChange.Lost) world.World.Add(entity, new Solid());
+        if (m.Solid == SolidChange.Gained) world.World.Remove<Solid>(entity);
+
+        // Não ocupa o grid: só a posição lógica.
+        if (!world.World.Has<Solid>(entity))
         {
-            case SolidChange.Lost:
-                // Frágil que quebrou: não foi vacada (estava sem Solid). Volta, re-solidifica e ocupa.
-                world.World.Set(entity, target);
-                world.World.Add(entity, new Solid());
-                world.Occupy(entity);
-                break;
-
-            case SolidChange.Gained:
-                // Restart re-solidificou: já foi vacada. Volta sem reocupar — fica quebrada de novo.
-                world.World.Remove<Solid>(entity);
-                world.World.Set(entity, target);
-                break;
-
-            default:
-                // Peça que não ocupa o grid: só a posição lógica.
-                if (!world.World.Has<Solid>(entity))
-                {
-                    world.World.Set(entity, target);
-                    break;
-                }
-                // Sólida (já vacada): volta se o destino estiver livre — nesse ponto só pode estar
-                // ocupado por peça fora do lote. Senão fica onde está.
-                if (world.Grid.IsValid(target.X, target.Y, target.Z)
-                    && !world.Grid.IsOccupied(target.X, target.Y, target.Z))
-                {
-                    world.World.Set(entity, target);
-                    world.Occupy(entity);
-                }
-                else
-                {
-                    world.Occupy(entity);
-                }
-                break;
+            world.World.Set(entity, target);
+            return;
         }
+
+        // Sólida (já vacada no lote): anda por -delta se o destino estiver livre; se tiver algo no
+        // caminho, fica onde está — igual a um passo normal que esbarra. Ocupa onde parar.
+        if (!world.Grid.IsOccupied(target.X, target.Y, target.Z))
+            world.World.Set(entity, target);
+        world.Occupy(entity);
     }
 }
