@@ -24,6 +24,7 @@ public class EditorRenderer
     private static readonly Color PlateColor = new(180, 140, 230);
     private static readonly Color ToggleColor = new(130, 80, 190);
     private static readonly Color TimelessBaseColor = new(60, 200, 120);
+    private static readonly Color PortalBoxColor = new(200, 70, 200);
     private static readonly Color EraserColor = new(230, 90, 90);
 
     private readonly GraphicsDevice _device;
@@ -72,6 +73,10 @@ public class EditorRenderer
         session.World.Query(in toggles, (ref Toggle t, ref GridPosition p) =>
             DrawTag(view, projection, grid, p, 1.1f, $"g{t.Group} x{(t.Threshold <= 0 ? 1 : t.Threshold)}", ToggleColor));
 
+        var portalBoxes = new QueryDescription().WithAll<PortalBox, GridPosition>();
+        session.World.Query(in portalBoxes, (ref PortalBox pb, ref GridPosition p) =>
+            DrawTag(view, projection, grid, p, 1.1f, $"g{pb.Group}", PortalBoxColor));
+
         _spriteBatch.End();
     }
 
@@ -117,6 +122,7 @@ public class EditorRenderer
         (EditorBrush.Plate, "[6]Placa "),
         (EditorBrush.Toggle, "[7]Toggle "),
         (EditorBrush.TimelessBase, "[8]Base "),
+        (EditorBrush.PortalBox, "[9]Portal-cx "),
         (EditorBrush.Eraser, "[0]Borracha"),
     };
 
@@ -192,6 +198,7 @@ public class EditorRenderer
         EditorBrush.Plate => $"Placa (grupo {editor.Group})",
         EditorBrush.Toggle => $"Toggle (grupo {editor.Group}, {(editor.ToggleSolidByDefault ? "some ao pisar" : "aparece ao pisar")}, precisa {editor.ToggleThreshold} placa(s))",
         EditorBrush.TimelessBase => "Base atemporal (apaga o historico de quem pisa)",
+        EditorBrush.PortalBox => $"Caixa portal (grupo {editor.Group})",
         var b => b.ToString(),
     };
 
@@ -205,6 +212,7 @@ public class EditorRenderer
         EditorBrush.Plate => PlateColor,
         EditorBrush.Toggle => ToggleColor,
         EditorBrush.TimelessBase => TimelessBaseColor,
+        EditorBrush.PortalBox => PortalBoxColor,
         EditorBrush.Eraser => EraserColor,
         _ => CursorColor,
     };

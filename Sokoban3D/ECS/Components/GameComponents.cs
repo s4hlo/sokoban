@@ -18,6 +18,7 @@ public enum BoxType
     Heavy,   // pesada: só uma por vez
     Fragile, // frágil: empurra como leve, mas quebra se for contra algo que não move
     Permanent, // verde: empurra como leve, mas o reverso não a desfaz (só o R volta ela)
+    Portal,  // teleporta quem tenta entrar nela pro lado oposto do portal parceiro (mesmo Group)
 }
 
 /// <summary>
@@ -42,8 +43,20 @@ public static class BoxRules
         BoxType.Heavy => 2,
         BoxType.Fragile => 0,
         BoxType.Permanent => 0, // mesmo peso da leve (empurra de graça)
+        BoxType.Portal => 0,    // empurrada de graça (só quando a saída está bloqueada)
         _ => 1,
     };
+}
+
+/// <summary>
+/// Pareamento de uma caixa <see cref="BoxType.Portal"/>: duas com o mesmo <see cref="Group"/>
+/// são um par. Quem tenta entrar numa delas é redirecionado pra o lado oposto da parceira (a
+/// célula parceira + direção do movimento). Mesma convenção de <see cref="PressurePlate.Group"/>
+/// e <see cref="Toggle.Group"/>. Um portal sem par é apenas uma caixa empurrável comum.
+/// </summary>
+public struct PortalBox
+{
+    public int Group;
 }
 
 /// <summary>

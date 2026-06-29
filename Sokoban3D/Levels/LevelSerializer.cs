@@ -25,6 +25,7 @@ public static class LevelSerializer
             new PortalCellConverter(),
             new PlateCellConverter(),
             new ToggleCellConverter(),
+            new PortalBoxCellConverter(),
         },
     };
 
@@ -50,7 +51,8 @@ public static class LevelSerializer
         AppendArray(sb, "Portals", FormatPortals(l.PortalSpawns), last: false);
         AppendArray(sb, "Plates", FormatPlates(l.PlateSpawns), last: false);
         AppendArray(sb, "Toggles", FormatToggles(l.ToggleSpawns), last: false);
-        AppendArray(sb, "Bases", Format(l.TimelessBaseSpawns), last: true);
+        AppendArray(sb, "Bases", Format(l.TimelessBaseSpawns), last: false);
+        AppendArray(sb, "PortalBoxes", FormatPortalBoxes(l.PortalBoxSpawns), last: true);
 
         sb.Append("}\n");
         File.WriteAllText(path, sb.ToString());
@@ -77,6 +79,14 @@ public static class LevelSerializer
         var list = new List<string>(cells.Count);
         foreach (var (x, y, z, idx, done) in cells)
             list.Add($"[{x}, {y}, {z}, {idx}, {(done ? "true" : "false")}]");
+        return list;
+    }
+
+    private static List<string> FormatPortalBoxes(List<(int X, int Y, int Z, int Group)> cells)
+    {
+        var list = new List<string>(cells.Count);
+        foreach (var (x, y, z, g) in cells)
+            list.Add($"[{x}, {y}, {z}, {g}]");
         return list;
     }
 
@@ -142,6 +152,7 @@ public static class LevelSerializer
         foreach (var p in dto.Plates) level.PlateSpawns.Add((p.X, p.Y, p.Z, p.Group));
         foreach (var t in dto.Toggles) level.ToggleSpawns.Add((t.X, t.Y, t.Z, t.Group, t.SolidByDefault, t.Threshold <= 0 ? 1 : t.Threshold));
         foreach (var c in dto.Bases) level.TimelessBaseSpawns.Add((c.X, c.Y, c.Z));
+        foreach (var p in dto.PortalBoxes) level.PortalBoxSpawns.Add((p.X, p.Y, p.Z, p.Group));
 
         return level;
     }
@@ -162,6 +173,7 @@ public static class LevelSerializer
         public List<PlateCell> Plates { get; set; } = new();
         public List<ToggleCell> Toggles { get; set; } = new();
         public List<Cell> Bases { get; set; } = new();
+        public List<PortalBoxCell> PortalBoxes { get; set; } = new();
     }
 
     private record struct Cell(int X, int Y, int Z);
@@ -169,6 +181,7 @@ public static class LevelSerializer
     private record struct PortalCell(int X, int Y, int Z, int LevelIndex, bool Completed);
     private record struct PlateCell(int X, int Y, int Z, int Group);
     private record struct ToggleCell(int X, int Y, int Z, int Group, bool SolidByDefault, int Threshold);
+    private record struct PortalBoxCell(int X, int Y, int Z, int Group);
 
     private static void ExpectArray(ref Utf8JsonReader reader)
     {
@@ -241,6 +254,23 @@ public static class LevelSerializer
         }
 
         public override void Write(Utf8JsonWriter writer, PlateCell v, JsonSerializerOptions options)
+            => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, {v.Group}]");
+    }
+
+    private sealed class PortalBoxCellConverter : JsonConverter<PortalBoxCell>
+    {
+        public override PortalBoxCell Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            ExpectArray(ref reader);
+            reader.Read(); int x = reader.GetInt32();
+            reader.Read(); int y = reader.GetInt32();
+            reader.Read(); int z = reader.GetInt32();
+            reader.Read(); int g = reader.GetInt32();
+            reader.Read(); // EndArray
+            return new PortalBoxCell(x, y, z, g);
+        }
+
+        public override void Write(Utf8JsonWriter writer, PortalBoxCell v, JsonSerializerOptions options)
             => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, {v.Group}]");
     }
 

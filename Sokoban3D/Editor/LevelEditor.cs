@@ -201,6 +201,7 @@ public class LevelEditor
         if (Pressed(k, Keys.D6)) SelectBrush(EditorBrush.Plate);
         if (Pressed(k, Keys.D7)) SelectBrush(EditorBrush.Toggle);
         if (Pressed(k, Keys.D8)) SelectBrush(EditorBrush.TimelessBase);
+        if (Pressed(k, Keys.D9)) SelectBrush(EditorBrush.PortalBox);
         if (Pressed(k, Keys.D0)) SelectBrush(EditorBrush.Eraser);
 
         // [ ] editam o item sob o cursor (grupo da placa/toggle, alvo do portal); sem nada
@@ -258,6 +259,18 @@ public class LevelEditor
                     var pl = _working.PlateSpawns[li];
                     pl.Group = Math.Max(0, pl.Group + delta);
                     _working.PlateSpawns[li] = pl;
+                    Rebuild();
+                }
+                else Group = Math.Max(0, Group + delta);
+                break;
+
+            case EditorBrush.PortalBox:
+                int pbi = _working.PortalBoxSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
+                if (pbi >= 0)
+                {
+                    var pb = _working.PortalBoxSpawns[pbi];
+                    pb.Group = Math.Max(0, pb.Group + delta);
+                    _working.PortalBoxSpawns[pbi] = pb;
                     Rebuild();
                 }
                 else Group = Math.Max(0, Group + delta);
@@ -363,6 +376,10 @@ public class LevelEditor
                 RemoveSolidsAt(x, y, z);
                 _working.ToggleSpawns.Add((x, y, z, Group, ToggleSolidByDefault, ClampThreshold(Group, ToggleThreshold)));
                 break;
+            case EditorBrush.PortalBox:
+                RemoveSolidsAt(x, y, z);
+                _working.PortalBoxSpawns.Add((x, y, z, Group));
+                break;
             case EditorBrush.Eraser:
                 EraseCell(x, y, z);
                 break;
@@ -382,6 +399,7 @@ public class LevelEditor
         _working.PlayerSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.EnemySpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.ToggleSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
+        _working.PortalBoxSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
     }
 
     private void RemoveMarkersAt(int x, int y, int z)
@@ -442,6 +460,7 @@ public class LevelEditor
         _working.PlateSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.ToggleSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.TimelessBaseSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
+        _working.PortalBoxSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
     }
 
     // ----- Arquivos -----

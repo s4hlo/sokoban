@@ -63,6 +63,10 @@ public class Level
     // Bases atemporais: marcadores que não ocupam o grid e congelam o undo de quem está em cima.
     public List<(int X, int Y, int Z)> TimelessBaseSpawns = new();
 
+    // Caixas portal: pares ligados por Group. Quem tenta entrar numa é teleportado pro lado
+    // oposto da parceira. Ocupam o grid como caixa comum (caem, têm undo).
+    public List<(int X, int Y, int Z, int Group)> PortalBoxSpawns = new();
+
     /// <summary>
     /// Cópia profunda da receita. O editor edita um clone do nível ativo, então o estado de
     /// jogo (caixas já movidas) não interfere no design, e vice-versa.
@@ -85,6 +89,7 @@ public class Level
             PlateSpawns = new(PlateSpawns),
             ToggleSpawns = new(ToggleSpawns),
             TimelessBaseSpawns = new(TimelessBaseSpawns),
+            PortalBoxSpawns = new(PortalBoxSpawns),
         };
     }
 }
@@ -143,6 +148,21 @@ public class LevelManager
             var entity = session.World.Create(
                 new GridPosition(x, y, z),
                 new Box { Type = type },
+                new SpawnPosition(x, y, z),
+                new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise)),
+                new Solid()
+            );
+            session.Occupy(entity);
+        }
+
+        // Spawn caixas portal: caixas comuns (ocupam o grid, caem, têm undo) com o pareamento
+        // PortalBox. O teleporte mora no MovementSystem; aqui é só uma caixa do tipo Portal.
+        foreach (var (x, y, z, group) in level.PortalBoxSpawns)
+        {
+            var entity = session.World.Create(
+                new GridPosition(x, y, z),
+                new Box { Type = BoxType.Portal },
+                new PortalBox { Group = group },
                 new SpawnPosition(x, y, z),
                 new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise)),
                 new Solid()

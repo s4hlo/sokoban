@@ -41,6 +41,8 @@ public class RenderSystem
     private static readonly Color HeavyBoxColor = new(90, 60, 40);
     private static readonly Color FragileBoxColor = new(205, 120, 120);
     private static readonly Color PermanentBoxColor = new(60, 170, 75);
+    // Caixa portal: magenta vivo, pra não se confundir com o tile ciano dos portais de nível.
+    private static readonly Color PortalBoxColor = new(200, 70, 200);
 
     // Sessão ativa do frame. O CubeRenderer (preso ao device) é reutilizado entre sessões
     // e compartilhado com o editor — por isso vem injetado, não criado aqui.
@@ -195,6 +197,7 @@ public class RenderSystem
         BoxType.Heavy => HeavyBoxColor,
         BoxType.Fragile => FragileBoxColor,
         BoxType.Permanent => PermanentBoxColor,
+        BoxType.Portal => PortalBoxColor,
         _ => MediumBoxColor,
     };
 }
