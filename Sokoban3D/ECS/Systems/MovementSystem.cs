@@ -196,7 +196,7 @@ public class MovementSystem
         // devolve false se este portal já foi atravessado nesta jogada — aí pula o teleporte.
         if (_world.World.Has<PortalBox>(occ) && visited.Add(occ))
         {
-            Entity? partner = FindPartner(occ);
+            Entity? partner = FindPartner(_world, occ);
             if (partner is not null)
             {
                 var b = _world.World.Get<GridPosition>(partner.Value);
@@ -247,17 +247,69 @@ public class MovementSystem
     /// O portal parceiro: o primeiro outro <see cref="PortalBox"/> de mesmo Group, ou null se não
     /// houver par. Com 3+ no mesmo grupo, vence o primeiro da iteração (arranjo não suportado).
     /// </summary>
-    private Entity? FindPartner(Entity portal)
+    private static Entity? FindPartner(GameWorld session, Entity portal)
     {
-        int group = _world.World.Get<PortalBox>(portal).Group;
+        int group = session.World.Get<PortalBox>(portal).Group;
         Entity? partner = null;
         var query = new QueryDescription().WithAll<PortalBox>();
-        _world.World.Query(in query, (Entity e, ref PortalBox pb) =>
+        session.World.Query(in query, (Entity e, ref PortalBox pb) =>
         {
             if (partner is null && e != portal && pb.Group == group)
                 partner = e;
         });
         return partner;
+    }
+
+    /// <summary>
+    /// Depois de um undo, reconstrói a animação de teleporte das peças que voltaram atravessando um
+    /// portal — sem o histórico ter gravado portal nenhum. Pra cada ação revertida, se o
+    /// deslocamento horizontal não é um passo cardinal simples (logo, foi teleporte) e há um portal
+    /// vizinho da célula de origem (onde a peça voltou — célula limpa, vale mesmo se ela caiu
+    /// depois), monta a <see cref="TeleportAnim"/> com as pontas trocadas: a peça é sugada de volta
+    /// pelo portal de SAÍDA e brota no de ENTRADA. Os portais saem todos do mundo (não se movem),
+    /// por isso o reverso não precisa tê-los lembrado.
+    /// </summary>
+    public void AnimateUndoTeleports(GameWorld session, IReadOnlyList<(Entity Entity, Move Move)> reverted)
+    {
+        foreach (var (e, m) in reverted)
+        {
+            // Passo cardinal simples (ou parada): desliza normal, sem teleporte.
+            if (System.Math.Abs(m.Dx) + System.Math.Abs(m.Dz) <= 1)
+                continue;
+            if (!session.World.Has<GridPosition>(e) || !session.World.Has<RenderPosition>(e))
+                continue;
+
+            var origin = session.World.Get<GridPosition>(e);
+            Entity? entryPortal = AdjacentPortal(session, origin);
+            if (entryPortal is null)
+                continue;
+            Entity? exitPortal = FindPartner(session, entryPortal.Value);
+            if (exitPortal is null)
+                continue;
+
+            var entryCell = session.World.Get<GridPosition>(entryPortal.Value);
+            var exitCell = session.World.Get<GridPosition>(exitPortal.Value);
+            var anim = new TeleportAnim
+            {
+                Start = session.World.Get<RenderPosition>(e).Value,
+                Entry = GridView.ToWorld(session.Grid, exitCell.X, exitCell.Y, exitCell.Z, GridView.PieceRise),
+                Exit = GridView.ToWorld(session.Grid, entryCell.X, entryCell.Y, entryCell.Z, GridView.PieceRise),
+                Elapsed = 0f,
+            };
+            if (session.World.Has<TeleportAnim>(e))
+                session.World.Set(e, anim);
+            else
+                session.World.Add(e, anim);
+        }
+    }
+
+    /// <summary>O <see cref="PortalBox"/> num dos 4 vizinhos horizontais da célula, ou null.</summary>
+    private static Entity? AdjacentPortal(GameWorld session, GridPosition cell)
+    {
+        return session.Spatial.CellWith<PortalBox>(cell.X + 1, cell.Y, cell.Z)
+            ?? session.Spatial.CellWith<PortalBox>(cell.X - 1, cell.Y, cell.Z)
+            ?? session.Spatial.CellWith<PortalBox>(cell.X, cell.Y, cell.Z + 1)
+            ?? session.Spatial.CellWith<PortalBox>(cell.X, cell.Y, cell.Z - 1);
     }
 
     /// <summary>

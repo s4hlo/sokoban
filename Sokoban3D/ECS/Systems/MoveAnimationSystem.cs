@@ -105,8 +105,8 @@ public class MoveAnimationSystem
     }
 
     /// <summary>
-    /// Encaixa toda peça na sua célula do grid imediatamente, sem interpolar. Usado pelo
-    /// undo (Z), que deve ser instantâneo: a peça reaparece onde estava, sem deslizar. Cancela
+    /// Encaixa toda peça na sua célula do grid imediatamente, sem interpolar. Usado pelo reset
+    /// total (F), que deve ser instantâneo: a peça reaparece onde estava, sem deslizar. Cancela
     /// também qualquer teleporte em andamento (senão ele continuaria dirigindo o render).
     /// </summary>
     public void SnapAll(GameWorld session)

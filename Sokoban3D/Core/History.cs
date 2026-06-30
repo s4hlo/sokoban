@@ -49,6 +49,12 @@ public class History
 {
     private readonly Dictionary<Entity, Stack<Move>> _stacks = new();
 
+    // Ações revertidas no último Undo (peça + delta). Exposto pra quem quiser reagir ao reverso
+    // sem o histórico precisar saber o PORQUÊ de cada ação — ex.: a animação de teleporte, que
+    // descobre os portais consultando o mundo a partir daqui. Reusado a cada Undo.
+    private readonly List<(Entity Entity, Move Move)> _lastReverted = new();
+    public IReadOnlyList<(Entity Entity, Move Move)> LastReverted => _lastReverted;
+
     public void Record(Entity entity, Move move)
     {
         if (!_stacks.TryGetValue(entity, out var stack))
@@ -88,6 +94,9 @@ public class History
         if (moves.Count == 0)
             return false;
 
+        _lastReverted.Clear();
+        _lastReverted.AddRange(moves);
+
         // Ergue do grid toda peça sólida do lote ANTES de reposicionar qualquer uma. O reverso é
         // simultâneo: o destino de uma peça é a célula que a peça à frente está liberando agora.
         // Vacando o lote inteiro, cada destino fica livre e a colisão restante (terreno, peças
@@ -119,7 +128,8 @@ public class History
         }
 
         // Sólida (já vacada no lote): anda por -delta se o destino estiver livre; se tiver algo no
-        // caminho, fica onde está — igual a um passo normal que esbarra. Ocupa onde parar.
+        // caminho (terreno, caixa verde, peça commitada numa placa atemporal), fica onde está — igual
+        // a um passo normal que esbarra. Ocupa onde parar.
         if (!world.Grid.IsOccupied(target.X, target.Y, target.Z))
             world.World.Set(entity, target);
         world.Occupy(entity);

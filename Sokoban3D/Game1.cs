@@ -133,10 +133,13 @@ public class Game1 : Game
         else if (Pressed(keyboard, Keys.Z))
         {
             // Move as peças na direção oposta do último turno. Tira o player do estado caído.
+            // Não snapa: deixa o RenderPosition defasado pra o MoveAnimationSystem deslizar as
+            // peças de volta, igual a um movimento normal. Quem voltou atravessando um portal ganha
+            // a animação de teleporte reconstruída do mundo (o histórico não guarda portal).
             if (Active.History.Undo(Active))
             {
                 Active.PlayerFell = false;
-                _animationSystem.SnapAll(Active);
+                _movementSystem.AnimateUndoTeleports(Active, Active.History.LastReverted);
             }
         }
         // T = suspender: sai pro pai preservando este nível (volta exatamente onde parou).

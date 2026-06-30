@@ -5,7 +5,9 @@
   "Players": [
     [4, 1, 4]
   ],
-  "Boxes": [],
+  "Boxes": [
+    [5, 1, 3, "Permanent"]
+  ],
   "Objectives": [],
   "Enemies": [],
   "Obstacles": [
@@ -93,5 +95,10 @@
   ],
   "Portals": [],
   "Plates": [],
-  "Toggles": []
+  "Toggles": [],
+  "Bases": [],
+  "PortalBoxes": [
+    [2, 1, 5, 0],
+    [5, 1, 5, 0]
+  ]
 }
