@@ -155,6 +155,16 @@ public struct LevelPortal
 }
 
 /// <summary>
+/// Tipos de obstáculo. O comportamento base (terreno sólido) é o mesmo; o tipo adiciona
+/// uma regra própria por cima.
+/// </summary>
+public enum ObstacleType
+{
+    Normal, // bloco comum: só bloqueia e sustenta
+    Sticky, // gruda quem encosta: a peça adjacente não consegue se AFASTAR dele (ver Core.Stickiness)
+}
+
+/// <summary>
 /// Marca uma entity como obstáculo: um bloco sólido fixo (voxel 1×1×1) que forma o
 /// terreno. Não é empurrável e ocupa o grid — bloqueia o movimento no seu nível (não
 /// dá pra subir nele) e sustenta o que estiver na célula de cima. Empilhados, criam
@@ -162,6 +172,7 @@ public struct LevelPortal
 /// </summary>
 public struct Obstacle
 {
+    public ObstacleType Type;
 }
 
 /// <summary>

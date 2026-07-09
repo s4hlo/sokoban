@@ -96,6 +96,10 @@ public class MovementSystem
         if (!_world.Grid.IsValid(targetX, pos.Y, targetZ))
             return;
 
+        // Sticky logo atrás do passo: o grude segura o player (não dá pra se afastar dele).
+        if (Stickiness.Holds(_world, player, dx, dz))
+            return;
+
         // Estado de cada peça ANTES de mutar o mundo. Se o player de fato se mover, o CommitTurn
         // grava o deslocamento líquido de cada uma (final menos isto).
         var before = Snapshot();
@@ -130,6 +134,14 @@ public class MovementSystem
     /// </summary>
     private void TryMoveBody(Entity player, GridPosition pos, List<(Entity Box, int Ox, int Oz)> magnets, int dx, int dz)
     {
+        // Qualquer peça do corpo grudada num sticky atrás do passo trava a translação inteira
+        // (o corpo é rígido). Checado antes de qualquer mutação: jogada impossível, sem turno.
+        if (Stickiness.Holds(_world, player, dx, dz))
+            return;
+        foreach (var (box, _, _) in magnets)
+            if (Stickiness.Holds(_world, box, dx, dz))
+                return;
+
         var before = Snapshot();
         _teleported.Clear();
         _pushMutated = false;
@@ -189,6 +201,16 @@ public class MovementSystem
         // O quarto de volta que leva o olhar de f até (dx,dz). ccw = (x,z)→(-z,x); senão (z,-x).
         bool ccw = -f.Dz == dx && f.Dx == dz;
         (int X, int Z) Rot(int x, int z) => ccw ? (-z, x) : (z, -x);
+
+        // Giro grudado: o deslocamento líquido de cada caixa varrida (a diagonal do arco) se
+        // decompõe nas direções (nx,nz) e (-ox,-oz); um sticky segurando a caixa contra
+        // qualquer uma delas trava o giro inteiro, antes de qualquer mutação.
+        foreach (var (box, ox, oz) in magnets)
+        {
+            var (nx, nz) = Rot(ox, oz);
+            if (Stickiness.Holds(_world, box, nx, nz) || Stickiness.Holds(_world, box, -ox, -oz))
+                return;
+        }
 
         var before = Snapshot();
         _teleported.Clear();
@@ -363,6 +385,11 @@ public class MovementSystem
         // Daqui pra baixo o portal é só uma caixa (sem par, ou de saída bloqueada).
         if (!_world.World.Has<Box>(occ))
             return null; // ocupado por algo que não é caixa (player, inimigo, obstáculo)
+
+        // Caixa com um sticky logo atrás não se afasta dele: o empurrão trava. Nem a frágil
+        // quebra — ela está presa pelo grude, não prensada contra algo à frente.
+        if (Stickiness.Holds(_world, occ, dx, dz))
+            return null;
 
         // BigBox: duas células como uma unidade só — regra própria, não passa pelo peso genérico.
         if (_world.World.Has<BigBox>(occ))

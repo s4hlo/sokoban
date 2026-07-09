@@ -62,7 +62,8 @@ public class EditorRenderer
     // linha (a tecla 2 cicla entre elas; o clique escolhe direto). A cor vem de ItemColor.
     private static readonly (PaletteItem Item, string Key, string Name)[] Palette =
     {
-        (new PaletteItem(EditorBrush.Obstacle), "1", "Obstaculo"),
+        (new PaletteItem(EditorBrush.Obstacle, Obstacle: ObstacleType.Normal), "1", "Obstaculo"),
+        (new PaletteItem(EditorBrush.Obstacle, Obstacle: ObstacleType.Sticky), "1", "Obstaculo sticky"),
         (new PaletteItem(EditorBrush.Box, BoxType.Light), "2", "Caixa leve"),
         (new PaletteItem(EditorBrush.Box, BoxType.Medium), "2", "Caixa media"),
         (new PaletteItem(EditorBrush.Box, BoxType.Heavy), "2", "Caixa pesada"),
@@ -247,8 +248,10 @@ public class EditorRenderer
         {
             var row = new Rectangle(panel.X, y, panel.Width, rowH);
             var color = ItemColor(item);
-            // Um tipo de caixa só acende quando é a brush Caixa E o tipo ativo.
-            bool active = item.Brush == editor.Brush && (item.Box is null || item.Box == editor.BoxType);
+            // Um tipo de caixa/obstáculo só acende quando é a brush certa E o tipo ativo.
+            bool active = item.Brush == editor.Brush
+                && (item.Box is null || item.Box == editor.BoxType)
+                && (item.Obstacle is null || item.Obstacle == editor.ObstacleType);
             if (active)
             {
                 Fill(row, color * 0.28f);
@@ -275,13 +278,17 @@ public class EditorRenderer
             Line(lx, ref ly, lh, (hint, HintColor));
     }
 
-    /// <summary>Cor de um item da paleta: a do tipo de caixa (a mesma do jogo) ou a da brush.</summary>
+    /// <summary>Cor de um item da paleta: a do tipo de caixa/obstáculo (a mesma do jogo) ou a da brush.</summary>
     private static Color ItemColor(PaletteItem item)
-        => item.Box is { } box ? Sokoban3D.ECS.Systems.RenderSystem.ColorOf(box) : BrushColor(item.Brush);
+        => item.Box is { } box ? Sokoban3D.ECS.Systems.RenderSystem.ColorOf(box)
+        : item.Obstacle == ObstacleType.Sticky ? Sokoban3D.ECS.Systems.RenderSystem.ColorOf(ObstacleType.Sticky)
+        : BrushColor(item.Brush);
 
-    /// <summary>Cor da seleção atual do editor (brush ativa, com o tipo de caixa se for Caixa).</summary>
+    /// <summary>Cor da seleção atual do editor (brush ativa, com o tipo se for Caixa/Obstáculo).</summary>
     private static Color ActiveColor(LevelEditor editor)
-        => ItemColor(new PaletteItem(editor.Brush, editor.Brush == EditorBrush.Box ? editor.BoxType : null));
+        => ItemColor(new PaletteItem(editor.Brush,
+            editor.Brush == EditorBrush.Box ? editor.BoxType : null,
+            editor.Brush == EditorBrush.Obstacle ? editor.ObstacleType : null));
 
     /// <summary>Barra de atalhos no rodapé: teclas em claro, o que fazem em apagado.</summary>
     private void DrawControlsBar()
@@ -373,6 +380,8 @@ public class EditorRenderer
 
     private static string BrushLabel(LevelEditor editor) => editor.Brush switch
     {
+        EditorBrush.Obstacle when editor.ObstacleType == ObstacleType.Sticky
+            => "Obstaculo sticky (gruda quem encosta: nao da pra se afastar)",
         EditorBrush.Box => $"Caixa ({editor.BoxType})",
         EditorBrush.Portal => $"Portal -> nivel {editor.PortalTarget}",
         EditorBrush.Plate => $"Placa (grupo {editor.Group})",
@@ -386,6 +395,7 @@ public class EditorRenderer
     /// <summary>Dica contextual da brush ativa: só as teclas que fazem sentido pra ela.</summary>
     private static string BrushHint(EditorBrush brush) => brush switch
     {
+        EditorBrush.Obstacle => "[1] cicla o tipo",
         EditorBrush.Box => "[2] cicla o tipo",
         EditorBrush.Portal => "[ ] ou Ctrl+Roda: nivel alvo",
         EditorBrush.Plate => "[ ] ou Ctrl+Roda: grupo",

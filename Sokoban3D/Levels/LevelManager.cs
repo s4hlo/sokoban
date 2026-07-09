@@ -26,19 +26,20 @@ public class Level
     public List<(int X, int Y, int Z)> ObjectiveSpawns = new();
     public List<(int X, int Y, int Z)> EnemySpawns = new();
 
-    // Obstáculos: blocos sólidos fixos que formam o terreno. Empilhados (vários Y na mesma
-    // coluna) viram paredes; uma camada inteira em y=0 é o piso onde as peças andam.
-    public List<(int X, int Y, int Z)> ObstacleSpawns = new();
+    // Obstáculos: blocos sólidos fixos que formam o terreno, com o tipo (comum, sticky).
+    // Empilhados (vários Y na mesma coluna) viram paredes; uma camada inteira em y=0 é o
+    // piso onde as peças andam.
+    public List<(int X, int Y, int Z, ObstacleType Type)> ObstacleSpawns = new();
 
     /// <summary>
-    /// Preenche uma camada inteira (todo X/Z) de obstáculos na altura <paramref name="y"/>.
+    /// Preenche uma camada inteira (todo X/Z) de obstáculos comuns na altura <paramref name="y"/>.
     /// É o piso padrão: sem buracos, ninguém cai. Remover obstáculos depois abre buracos.
     /// </summary>
     public void FillFloor(int y = 0)
     {
         for (int x = 0; x < Width; x++)
             for (int z = 0; z < Depth; z++)
-                ObstacleSpawns.Add((x, y, z));
+                ObstacleSpawns.Add((x, y, z, ObstacleType.Normal));
     }
 
     /// <summary>
@@ -124,11 +125,11 @@ public class LevelManager
 
         // Spawn obstáculos (terreno). São estáticos: ocupam o grid, mas não têm
         // RenderPosition — o render os desenha direto da célula lógica.
-        foreach (var (x, y, z) in level.ObstacleSpawns)
+        foreach (var (x, y, z, type) in level.ObstacleSpawns)
         {
             var entity = session.World.Create(
                 new GridPosition(x, y, z),
-                new Obstacle(),
+                new Obstacle { Type = type },
                 new Solid()
             );
             session.Occupy(entity);

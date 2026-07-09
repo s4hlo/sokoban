@@ -3,10 +3,10 @@ using Sokoban3D.ECS.Components;
 namespace Sokoban3D.Editor;
 
 /// <summary>
-/// Um item clicável da paleta do HUD: a brush e, no caso das caixas, o tipo específico —
-/// cada tipo de caixa tem a própria linha na paleta, em vez de ciclar num item só.
+/// Um item clicável da paleta do HUD: a brush e, no caso das caixas e dos obstáculos, o tipo
+/// específico — cada tipo tem a própria linha na paleta, em vez de ciclar num item só.
 /// </summary>
-public readonly record struct PaletteItem(EditorBrush Brush, BoxType? Box = null);
+public readonly record struct PaletteItem(EditorBrush Brush, BoxType? Box = null, ObstacleType? Obstacle = null);
 
 /// <summary>
 /// O que o editor coloca na célula do cursor. Sólidos (obstáculo, caixa, player) ocupam o

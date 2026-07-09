@@ -11,8 +11,8 @@ namespace Sokoban3D.Levels;
 /// <summary>
 /// Salva e carrega um <see cref="Level"/> como JSON legível. A leitura usa System.Text.Json
 /// com um DTO dedicado; a escrita é feita à mão pra deixar o arquivo bonito: cada célula numa
-/// linha só (<c>[x, y, z]</c> pra marcadores/obstáculos, <c>[x, y, z, "Tipo"]</c> pra caixas,
-/// <c>[x, y, z, alvo, concluido]</c> pra portais).
+/// linha só (<c>[x, y, z]</c> pra marcadores/obstáculos comuns, <c>[x, y, z, "Tipo"]</c> pra
+/// caixas e obstáculos tipados, <c>[x, y, z, alvo, concluido]</c> pra portais).
 /// </summary>
 public static class LevelSerializer
 {
@@ -22,6 +22,7 @@ public static class LevelSerializer
         {
             new CellConverter(),
             new BoxCellConverter(),
+            new ObstacleCellConverter(),
             new PortalCellConverter(),
             new PlateCellConverter(),
             new ToggleCellConverter(),
@@ -48,7 +49,7 @@ public static class LevelSerializer
         AppendArray(sb, "Boxes", FormatBoxes(l.BoxSpawns), last: false);
         AppendArray(sb, "Objectives", Format(l.ObjectiveSpawns), last: false);
         AppendArray(sb, "Enemies", Format(l.EnemySpawns), last: false);
-        AppendArray(sb, "Obstacles", Format(l.ObstacleSpawns), last: false);
+        AppendArray(sb, "Obstacles", FormatObstacles(l.ObstacleSpawns), last: false);
         AppendArray(sb, "Portals", FormatPortals(l.PortalSpawns), last: false);
         AppendArray(sb, "Plates", FormatPlates(l.PlateSpawns), last: false);
         AppendArray(sb, "Toggles", FormatToggles(l.ToggleSpawns), last: false);
@@ -73,6 +74,16 @@ public static class LevelSerializer
         var list = new List<string>(cells.Count);
         foreach (var (x, y, z, t) in cells)
             list.Add($"[{x}, {y}, {z}, \"{t}\"]");
+        return list;
+    }
+
+    // Obstáculo comum fica no formato curto [x, y, z] (o grosso do terreno, e compatível com os
+    // mapas antigos); só os tipados ganham o quarto elemento.
+    private static List<string> FormatObstacles(List<(int X, int Y, int Z, ObstacleType Type)> cells)
+    {
+        var list = new List<string>(cells.Count);
+        foreach (var (x, y, z, t) in cells)
+            list.Add(t == ObstacleType.Normal ? $"[{x}, {y}, {z}]" : $"[{x}, {y}, {z}, \"{t}\"]");
         return list;
     }
 
@@ -157,7 +168,7 @@ public static class LevelSerializer
         foreach (var c in dto.Boxes) level.BoxSpawns.Add((c.X, c.Y, c.Z, c.Type));
         foreach (var c in dto.Objectives) level.ObjectiveSpawns.Add((c.X, c.Y, c.Z));
         foreach (var c in dto.Enemies) level.EnemySpawns.Add((c.X, c.Y, c.Z));
-        foreach (var c in dto.Obstacles) level.ObstacleSpawns.Add((c.X, c.Y, c.Z));
+        foreach (var c in dto.Obstacles) level.ObstacleSpawns.Add((c.X, c.Y, c.Z, c.Type));
         foreach (var p in dto.Portals) level.PortalSpawns.Add((p.X, p.Y, p.Z, p.LevelIndex, p.Completed));
         foreach (var p in dto.Plates) level.PlateSpawns.Add((p.X, p.Y, p.Z, p.Group));
         foreach (var t in dto.Toggles) level.ToggleSpawns.Add((t.X, t.Y, t.Z, t.Group, t.SolidByDefault, t.Threshold <= 0 ? 1 : t.Threshold));
@@ -179,7 +190,7 @@ public static class LevelSerializer
         public List<BoxCell> Boxes { get; set; } = new();
         public List<Cell> Objectives { get; set; } = new();
         public List<Cell> Enemies { get; set; } = new();
-        public List<Cell> Obstacles { get; set; } = new();
+        public List<ObstacleCell> Obstacles { get; set; } = new();
         public List<PortalCell> Portals { get; set; } = new();
         public List<PlateCell> Plates { get; set; } = new();
         public List<ToggleCell> Toggles { get; set; } = new();
@@ -190,6 +201,7 @@ public static class LevelSerializer
 
     private record struct Cell(int X, int Y, int Z);
     private record struct BoxCell(int X, int Y, int Z, BoxType Type);
+    private record struct ObstacleCell(int X, int Y, int Z, ObstacleType Type);
     private record struct PortalCell(int X, int Y, int Z, int LevelIndex, bool Completed);
     private record struct PlateCell(int X, int Y, int Z, int Group);
     private record struct ToggleCell(int X, int Y, int Z, int Group, bool SolidByDefault, int Threshold);
@@ -233,6 +245,31 @@ public static class LevelSerializer
 
         public override void Write(Utf8JsonWriter writer, BoxCell v, JsonSerializerOptions options)
             => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, \"{v.Type}\"]");
+    }
+
+    private sealed class ObstacleCellConverter : JsonConverter<ObstacleCell>
+    {
+        public override ObstacleCell Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            ExpectArray(ref reader);
+            reader.Read(); int x = reader.GetInt32();
+            reader.Read(); int y = reader.GetInt32();
+            reader.Read(); int z = reader.GetInt32();
+            // O tipo é opcional (mapas antigos têm 3 elementos): se vier string, lê; senão, Normal.
+            var t = ObstacleType.Normal;
+            reader.Read();
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                t = Enum.Parse<ObstacleType>(reader.GetString()!, ignoreCase: true);
+                reader.Read(); // EndArray
+            }
+            return new ObstacleCell(x, y, z, t);
+        }
+
+        public override void Write(Utf8JsonWriter writer, ObstacleCell v, JsonSerializerOptions options)
+            => writer.WriteRawValue(v.Type == ObstacleType.Normal
+                ? $"[{v.X}, {v.Y}, {v.Z}]"
+                : $"[{v.X}, {v.Y}, {v.Z}, \"{v.Type}\"]");
     }
 
     private sealed class BigBoxCellConverter : JsonConverter<BigBoxCell>

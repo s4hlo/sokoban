@@ -14,8 +14,10 @@ public class RenderSystem
 {
     // Chão-morte: laje escura no fundo, visível pelos buracos. Pisar nela mata.
     private static readonly Color DeathFloorColor = new(35, 20, 25);
-    // Obstáculos (terreno sólido onde se anda).
+    // Obstáculos (terreno sólido onde se anda). O sticky em verde-limo "gosmento", bem
+    // distinto do cinza do terreno comum.
     private static readonly Color ObstacleColor = new(95, 100, 115);
+    private static readonly Color StickyObstacleColor = new(150, 175, 85);
     private static readonly Color PlayerColor = new(70, 130, 220);
     // Player caído (congelado no chão-morte): avermelhado pra sinalizar a morte.
     private static readonly Color PlayerFellColor = new(200, 70, 70);
@@ -166,10 +168,10 @@ public class RenderSystem
         var scale = Vector3.One;
 
         var query = new QueryDescription().WithAll<Obstacle, GridPosition>();
-        _world.World.Query(in query, (ref GridPosition p) =>
+        _world.World.Query(in query, (ref Obstacle o, ref GridPosition p) =>
         {
             var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.ObstacleRise);
-            _cubes.Draw(pos, scale, ObstacleColor, view, projection);
+            _cubes.Draw(pos, scale, ColorOf(o.Type), view, projection);
         });
     }
 
@@ -236,6 +238,13 @@ public class RenderSystem
             _cubes.Draw((pr + br) * 0.5f, linkScale, PlayerNoseColor, view, projection);
         }
     }
+
+    /// <summary>Cor de cada tipo de obstáculo — compartilhada com a paleta do editor.</summary>
+    public static Color ColorOf(ObstacleType type) => type switch
+    {
+        ObstacleType.Sticky => StickyObstacleColor,
+        _ => ObstacleColor,
+    };
 
     /// <summary>Cor de cada tipo de caixa — compartilhada com a paleta do editor.</summary>
     public static Color ColorOf(BoxType type) => type switch

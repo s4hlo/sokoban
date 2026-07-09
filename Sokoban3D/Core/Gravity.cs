@@ -42,8 +42,9 @@ public static class Gravity
         foreach (var e in movers)
         {
             // Caixa magnética grudada no player não cai: o grude a segura, mesmo pairando
-            // sobre um buraco. Checado na hora, já refletindo quedas anteriores.
-            if (Magnetism.IsHeld(world, e))
+            // sobre um buraco. Checado na hora, já refletindo quedas anteriores. Mesmo vale
+            // pra peça pendurada num obstáculo sticky logo acima (cair seria se afastar dele).
+            if (Magnetism.IsHeld(world, e) || Stickiness.HoldsAgainstFall(world, e))
                 continue;
 
             var pos = world.World.Get<GridPosition>(e);

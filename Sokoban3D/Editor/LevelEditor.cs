@@ -63,6 +63,8 @@ public class LevelEditor
     public int CursorZ { get; private set; }
     public EditorBrush Brush { get; private set; } = EditorBrush.Obstacle;
     public BoxType BoxType { get; private set; } = BoxType.Medium;
+    // Tipo do próximo obstáculo a ser colocado (reselecionar a brush Obstáculo cicla).
+    public ObstacleType ObstacleType { get; private set; } = ObstacleType.Normal;
     // Eixo da próxima caixa grande a ser colocada (ou da que já está sob o cursor, ao reselecionar).
     public BigBoxAxis BigBoxAxis { get; private set; } = BigBoxAxis.X;
     public int PortalTarget { get; private set; } = 1;
@@ -277,7 +279,7 @@ public class LevelEditor
         if (hudBrush is { } btn)
         {
             if (LeftPressed(mouse))
-                SelectBrush(btn.Brush, btn.Box);
+                SelectBrush(btn.Brush, btn.Box, btn.Obstacle);
             return;
         }
 
@@ -371,7 +373,7 @@ public class LevelEditor
     /// <summary>True se a célula contém um item do mesmo tipo da brush ativa.</summary>
     private bool BrushMatchesAt(int x, int y, int z) => Brush switch
     {
-        EditorBrush.Obstacle => _working.ObstacleSpawns.Contains((x, y, z)),
+        EditorBrush.Obstacle => _working.ObstacleSpawns.Any(c => c.X == x && c.Y == y && c.Z == z),
         EditorBrush.Box => _working.BoxSpawns.Any(b => b.X == x && b.Y == y && b.Z == z),
         EditorBrush.Player => _working.PlayerSpawns.Contains((x, y, z)),
         EditorBrush.Objective => _working.ObjectiveSpawns.Contains((x, y, z)),
@@ -446,7 +448,7 @@ public class LevelEditor
     private Level ExtractCell(int x, int y, int z)
     {
         var c = new Level();
-        Take(_working.ObstacleSpawns, c.ObstacleSpawns, s => s == (x, y, z));
+        Take(_working.ObstacleSpawns, c.ObstacleSpawns, s => s.X == x && s.Y == y && s.Z == z);
         Take(_working.PlayerSpawns, c.PlayerSpawns, s => s == (x, y, z));
         Take(_working.EnemySpawns, c.EnemySpawns, s => s == (x, y, z));
         Take(_working.ObjectiveSpawns, c.ObjectiveSpawns, s => s == (x, y, z));
@@ -490,7 +492,7 @@ public class LevelEditor
             EraseCell(b.X + dx + ox, b.Y + dy, b.Z + dz + oz); // segunda célula da caixa grande
         }
 
-        foreach (var s in content.ObstacleSpawns) _working.ObstacleSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
+        foreach (var s in content.ObstacleSpawns) _working.ObstacleSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz, s.Type));
         foreach (var s in content.PlayerSpawns) _working.PlayerSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
         foreach (var s in content.EnemySpawns) _working.EnemySpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
         foreach (var s in content.ObjectiveSpawns) _working.ObjectiveSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
@@ -553,8 +555,11 @@ public class LevelEditor
             Brush = EditorBrush.Objective;
         else if (_working.TimelessBaseSpawns.Contains((x, y, z)))
             Brush = EditorBrush.TimelessBase;
-        else if (_working.ObstacleSpawns.Contains((x, y, z)))
+        else if ((i = _working.ObstacleSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z)) >= 0)
+        {
             Brush = EditorBrush.Obstacle;
+            ObstacleType = _working.ObstacleSpawns[i].Type;
+        }
         else
         {
             SetStatus("Nada aqui para copiar", warning: true);
@@ -566,7 +571,7 @@ public class LevelEditor
 
     /// <summary>True se qualquer spawn da receita mora na célula (sólido ou marcador).</summary>
     private bool AnyAt(int x, int y, int z)
-        => _working.ObstacleSpawns.Contains((x, y, z))
+        => _working.ObstacleSpawns.Any(c => c.X == x && c.Y == y && c.Z == z)
         || _working.PlayerSpawns.Contains((x, y, z))
         || _working.EnemySpawns.Contains((x, y, z))
         || _working.ObjectiveSpawns.Contains((x, y, z))
@@ -634,16 +639,21 @@ public class LevelEditor
     };
 
     /// <summary>
-    /// Seleciona a brush ativa. O clique na paleta traz o tipo de caixa exato em
-    /// <paramref name="box"/>; sem ele (teclado), reselecionar a Caixa cicla o tipo,
-    /// reselecionar o Toggle inverte o estado de repouso e a CxGrande inverte o eixo.
+    /// Seleciona a brush ativa. O clique na paleta traz o tipo de caixa/obstáculo exato em
+    /// <paramref name="box"/>/<paramref name="obstacle"/>; sem ele (teclado), reselecionar a
+    /// Caixa ou o Obstáculo cicla o tipo, reselecionar o Toggle inverte o estado de repouso
+    /// e a CxGrande inverte o eixo.
     /// </summary>
-    private void SelectBrush(EditorBrush brush, BoxType? box = null)
+    private void SelectBrush(EditorBrush brush, BoxType? box = null, ObstacleType? obstacle = null)
     {
         if (box is { } b)
             BoxType = b;
+        else if (obstacle is { } o)
+            ObstacleType = o;
         else if (brush == EditorBrush.Box && Brush == EditorBrush.Box)
             BoxType = BoxCycle[(Array.IndexOf(BoxCycle, BoxType) + 1) % BoxCycle.Length];
+        else if (brush == EditorBrush.Obstacle && Brush == EditorBrush.Obstacle)
+            ObstacleType = ObstacleType == ObstacleType.Normal ? ObstacleType.Sticky : ObstacleType.Normal;
         else if (brush == EditorBrush.Toggle && Brush == EditorBrush.Toggle)
             ToggleSolidByDefault = !ToggleSolidByDefault;
         else if (brush == EditorBrush.BigBox && Brush == EditorBrush.BigBox)
@@ -774,7 +784,7 @@ public class LevelEditor
         {
             case EditorBrush.Obstacle:
                 RemoveSolidsAt(x, y, z);
-                _working.ObstacleSpawns.Add((x, y, z));
+                _working.ObstacleSpawns.Add((x, y, z, ObstacleType));
                 break;
             case EditorBrush.Box:
                 RemoveSolidsAt(x, y, z);
