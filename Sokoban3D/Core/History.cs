@@ -130,7 +130,7 @@ public class History
         // Sólida (já vacada no lote): anda por -delta se o destino estiver livre; se tiver algo no
         // caminho (terreno, caixa verde, peça commitada numa placa atemporal), fica onde está — igual
         // a um passo normal que esbarra. Ocupa onde parar.
-        if (!world.Grid.IsOccupied(target.X, target.Y, target.Z))
+        if (world.FootprintFree(entity, target.X, target.Y, target.Z))
             world.World.Set(entity, target);
         world.Occupy(entity);
     }

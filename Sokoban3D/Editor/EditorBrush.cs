@@ -15,5 +15,6 @@ public enum EditorBrush
     Toggle,
     TimelessBase,
     PortalBox,
+    BigBox,
     Eraser,
 }

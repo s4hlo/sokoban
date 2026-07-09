@@ -198,8 +198,19 @@ public class RenderSystem
 
         // Só caixas com Solid: as quebradas perdem o tag e somem naturalmente da query.
         var boxes = new QueryDescription().WithAll<Box, RenderPosition, Solid>();
-        _world.World.Query(in boxes, (ref Box b, ref RenderPosition r) =>
+        _world.World.Query(in boxes, (Entity e, ref Box b, ref RenderPosition r) =>
         {
+            // BigBox: cubo esticado no eixo dela, centrado entre as duas células (RenderPosition
+            // só acompanha a âncora — o offset de meia-célula completa o desenho até a segunda).
+            if (_world.World.Has<BigBox>(e))
+            {
+                var axis = _world.World.Get<BigBox>(e).Axis;
+                var offset = axis == BigBoxAxis.X ? new Vector3(0.5f, 0f, 0f) : new Vector3(0f, 0f, 0.5f);
+                var scale = axis == BigBoxAxis.X ? new Vector3(2f, 1f, 1f) : new Vector3(1f, 1f, 2f);
+                _cubes.Draw(r.Value + offset, scale, ColorOf(b.Type), view, projection);
+                return;
+            }
+
             _cubes.Draw(r.Value, boxScale, ColorOf(b.Type), view, projection);
         });
     }

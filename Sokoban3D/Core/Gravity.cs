@@ -48,7 +48,7 @@ public static class Gravity
 
             var pos = world.World.Get<GridPosition>(e);
             int ny = pos.Y;
-            while (!world.Grid.IsOccupied(pos.X, ny - 1, pos.Z))
+            while (world.FootprintFree(e, pos.X, ny - 1, pos.Z))
                 ny--;
 
             if (ny != pos.Y)

@@ -82,6 +82,28 @@ public struct PortalBox
 }
 
 /// <summary>
+/// Eixo em que uma <see cref="BigBox"/> se estende além da sua <see cref="GridPosition"/> (âncora).
+/// </summary>
+public enum BigBoxAxis
+{
+    X,
+    Z,
+}
+
+/// <summary>
+/// Marca uma caixa como ocupando DUAS células em vez de uma: além da <see cref="GridPosition"/>
+/// (a âncora, o canto de menor X/Z), ocupa também a célula adjacente âncora+1 no <see cref="Axis"/>.
+/// Empurrão (<see cref="Systems.MovementSystem"/>), queda (<see cref="Core.Gravity"/>) e ocupação de
+/// grid (<see cref="Core.GameWorld"/>) tratam as duas células como uma unidade só. Sempre peso Light —
+/// o <see cref="Box"/> associado deve ter <see cref="BoxType.Light"/>; combinar com outro tipo não
+/// é suportado (o empurrão ignora peso/fragilidade/etc. e só trava ou desliza livre).
+/// </summary>
+public struct BigBox
+{
+    public BigBoxAxis Axis;
+}
+
+/// <summary>
 /// Tag: a entity ocupa uma célula do grid (player, caixa não-quebrada, inimigo, obstáculo).
 /// É a ÚNICA fonte de verdade no ECS sobre ocupação — "ocupa o grid?" é <c>World.Has&lt;Solid&gt;(e)</c>.
 /// Objetivos e portais NÃO têm Solid (o player precisa pisar em cima).

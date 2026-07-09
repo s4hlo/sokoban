@@ -67,6 +67,10 @@ public class Level
     // oposto da parceira. Ocupam o grid como caixa comum (caem, têm undo).
     public List<(int X, int Y, int Z, int Group)> PortalBoxSpawns = new();
 
+    // Caixas grandes (1x2/2x1): ocupam a célula (X,Y,Z) [âncora] e a adjacente no Axis. Sempre
+    // Light — ver BigBox. Caem e têm undo iguais a uma caixa comum, mas com footprint de 2 células.
+    public List<(int X, int Y, int Z, BigBoxAxis Axis)> BigBoxSpawns = new();
+
     /// <summary>
     /// Cópia profunda da receita. O editor edita um clone do nível ativo, então o estado de
     /// jogo (caixas já movidas) não interfere no design, e vice-versa.
@@ -90,6 +94,7 @@ public class Level
             ToggleSpawns = new(ToggleSpawns),
             TimelessBaseSpawns = new(TimelessBaseSpawns),
             PortalBoxSpawns = new(PortalBoxSpawns),
+            BigBoxSpawns = new(BigBoxSpawns),
         };
     }
 }
@@ -165,6 +170,21 @@ public class LevelManager
                 new GridPosition(x, y, z),
                 new Box { Type = BoxType.Portal },
                 new PortalBox { Group = group },
+                new SpawnPosition(x, y, z),
+                new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise)),
+                new Solid()
+            );
+            session.Occupy(entity);
+        }
+
+        // Spawn caixas grandes: caixa comum (Light) com o marcador BigBox, que faz session.Occupy
+        // (footprint-aware) ocupar a âncora e a célula extra do Axis.
+        foreach (var (x, y, z, axis) in level.BigBoxSpawns)
+        {
+            var entity = session.World.Create(
+                new GridPosition(x, y, z),
+                new Box { Type = BoxType.Light },
+                new BigBox { Axis = axis },
                 new SpawnPosition(x, y, z),
                 new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise)),
                 new Solid()
@@ -310,7 +330,8 @@ public class LevelManager
             if (!session.World.Has<Solid>(e))
                 toResolidify.Add(e);
 
-            session.Grid.Place(spawn.X, spawn.Y, spawn.Z, e);
+            foreach (var (dx, dz) in session.FootprintOffsets(e))
+                session.Grid.Place(spawn.X + dx, spawn.Y, spawn.Z + dz, e);
         });
 
         foreach (var e in toResolidify)

@@ -364,6 +364,10 @@ public class MovementSystem
         if (!_world.World.Has<Box>(occ))
             return null; // ocupado por algo que não é caixa (player, inimigo, obstáculo)
 
+        // BigBox: duas células como uma unidade só — regra própria, não passa pelo peso genérico.
+        if (_world.World.Has<BigBox>(occ))
+            return PushBigBox(occ, x, y, z, dx, dz);
+
         var box = _world.World.Get<Box>(occ);
         int weight = BoxRules.Weight(box.Type);
         if (weight > budget)
@@ -396,6 +400,50 @@ public class MovementSystem
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Empurra uma <see cref="BigBox"/> (duas células). Ao longo do próprio eixo ela desliza como
+    /// uma caixa comum: só a célula além da borda dianteira (na direção do passo) precisa estar
+    /// livre — a célula traseira ocupa a que a dianteira libera. Perpendicular ao eixo, as DUAS
+    /// células de destino (uma por célula do footprint) precisam estar livres; ao contrário de uma
+    /// caixa leve comum, ela não tenta empurrar o que encontrar nelas — trava em vez de encadear
+    /// (simplificação deliberada; peso "de graça" mas sem transmitir empurrão). <paramref name="qx"/>
+    /// etc. é a célula originalmente consultada por quem chamou <see cref="PushInto"/>, devolvida
+    /// livre (como qualquer empurrão bem-sucedido) se a caixa sair do lugar.
+    /// </summary>
+    private GridPosition? PushBigBox(Entity occ, int qx, int qy, int qz, int dx, int dz)
+    {
+        var big = _world.World.Get<BigBox>(occ);
+        var anchor = _world.World.Get<GridPosition>(occ);
+        var (ox, oz) = big.Axis == BigBoxAxis.X ? (1, 0) : (0, 1);
+        int secondX = anchor.X + ox, secondZ = anchor.Z + oz;
+
+        bool alongAxis = (ox != 0 && dx != 0) || (oz != 0 && dz != 0);
+
+        if (alongAxis)
+        {
+            // O offset do eixo é sempre +1, então a borda dianteira na direção positiva é a
+            // célula "second"; na negativa, é a própria âncora.
+            bool positive = dx > 0 || dz > 0;
+            int frontX = positive ? secondX : anchor.X;
+            int frontZ = positive ? secondZ : anchor.Z;
+
+            if (_world.Grid.IsOccupied(frontX + dx, anchor.Y, frontZ + dz))
+                return null;
+        }
+        else
+        {
+            // Deslocamento lateral: as duas células novas nunca sobrepõem o footprint atual.
+            if (_world.Grid.IsOccupied(anchor.X + dx, anchor.Y, anchor.Z + dz))
+                return null;
+            if (_world.Grid.IsOccupied(secondX + dx, anchor.Y, secondZ + dz))
+                return null;
+        }
+
+        _world.Move(occ, new GridPosition(anchor.X + dx, anchor.Y, anchor.Z + dz));
+        _pushMutated = true;
+        return new GridPosition(qx, qy, qz);
     }
 
     /// <summary>

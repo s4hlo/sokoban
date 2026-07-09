@@ -15,7 +15,8 @@
     [6, 0, 4, "Light"],
     [1, 2, 2, "Light"],
     [2, 2, 2, "Light"],
-    [2, 2, 4, "Permanent"]
+    [2, 2, 4, "Permanent"],
+    [8, 1, 1, "Magnetic"]
   ],
   "Objectives": [],
   "Enemies": [],
@@ -129,5 +130,6 @@
   "PortalBoxes": [
     [1, 2, 5, 0],
     [8, 1, 4, 0]
-  ]
+  ],
+  "BigBoxes": []
 }

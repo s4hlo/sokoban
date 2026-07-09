@@ -34,6 +34,8 @@ public class LevelEditor
     public int CursorZ { get; private set; }
     public EditorBrush Brush { get; private set; } = EditorBrush.Obstacle;
     public BoxType BoxType { get; private set; } = BoxType.Medium;
+    // Eixo da próxima caixa grande a ser colocada (ou da que já está sob o cursor, ao reselecionar).
+    public BigBoxAxis BigBoxAxis { get; private set; } = BigBoxAxis.X;
     public int PortalTarget { get; private set; } = 1;
     // Grupo que liga placas aos blocos toggle, e o estado de repouso do bloco que será colocado.
     public int Group { get; private set; } = 0;
@@ -202,6 +204,7 @@ public class LevelEditor
         if (Pressed(k, Keys.D7)) SelectBrush(EditorBrush.Toggle);
         if (Pressed(k, Keys.D8)) SelectBrush(EditorBrush.TimelessBase);
         if (Pressed(k, Keys.D9)) SelectBrush(EditorBrush.PortalBox);
+        if (Pressed(k, Keys.B)) SelectBrush(EditorBrush.BigBox);
         if (Pressed(k, Keys.D0)) SelectBrush(EditorBrush.Eraser);
 
         // [ ] editam o item sob o cursor (grupo da placa/toggle, alvo do portal); sem nada
@@ -225,6 +228,8 @@ public class LevelEditor
             BoxType = (BoxType)(((int)BoxType + 1) % Enum.GetValues<BoxType>().Length);
         else if (brush == EditorBrush.Toggle && Brush == EditorBrush.Toggle)
             ToggleSolidByDefault = !ToggleSolidByDefault;
+        else if (brush == EditorBrush.BigBox && Brush == EditorBrush.BigBox)
+            BigBoxAxis = BigBoxAxis == BigBoxAxis.X ? BigBoxAxis.Z : BigBoxAxis.X;
         Brush = brush;
     }
 
@@ -380,6 +385,20 @@ public class LevelEditor
                 RemoveSolidsAt(x, y, z);
                 _working.PortalBoxSpawns.Add((x, y, z, Group));
                 break;
+            case EditorBrush.BigBox:
+            {
+                var (ox, oz) = BigBoxAxis == BigBoxAxis.X ? (1, 0) : (0, 1);
+                int bx = x + ox, bz = z + oz;
+                if (bx < 0 || bx >= _working.Width || bz < 0 || bz >= _working.Depth)
+                {
+                    Status = "Caixa grande não cabe aqui (segunda célula fora do grid)";
+                    break;
+                }
+                RemoveSolidsAt(x, y, z);
+                RemoveSolidsAt(bx, y, bz);
+                _working.BigBoxSpawns.Add((x, y, z, BigBoxAxis));
+                break;
+            }
             case EditorBrush.Eraser:
                 EraseCell(x, y, z);
                 break;
@@ -400,6 +419,19 @@ public class LevelEditor
         _working.EnemySpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.ToggleSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.PortalBoxSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
+        // Caixa grande ocupa DUAS células: mexer em qualquer uma delas remove a unidade inteira,
+        // senão sobraria uma "meia" caixa apontando pra uma célula que já tem outra coisa.
+        _working.BigBoxSpawns.RemoveAll(c => BigBoxOccupies(c, x, y, z));
+    }
+
+    private static bool BigBoxOccupies((int X, int Y, int Z, BigBoxAxis Axis) box, int x, int y, int z)
+    {
+        if (box.Y != y)
+            return false;
+        if (box.X == x && box.Z == z)
+            return true;
+        var (ox, oz) = box.Axis == BigBoxAxis.X ? (1, 0) : (0, 1);
+        return box.X + ox == x && box.Z + oz == z;
     }
 
     private void RemoveMarkersAt(int x, int y, int z)
@@ -461,6 +493,11 @@ public class LevelEditor
         _working.ToggleSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.TimelessBaseSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.PortalBoxSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
+        _working.BigBoxSpawns.RemoveAll(c =>
+        {
+            var (ox, oz) = c.Axis == BigBoxAxis.X ? (1, 0) : (0, 1);
+            return Out(c.X, c.Y, c.Z) || Out(c.X + ox, c.Y, c.Z + oz);
+        });
     }
 
     // ----- Arquivos -----

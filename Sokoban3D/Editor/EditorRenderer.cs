@@ -25,6 +25,7 @@ public class EditorRenderer
     private static readonly Color ToggleColor = new(130, 80, 190);
     private static readonly Color TimelessBaseColor = new(60, 200, 120);
     private static readonly Color PortalBoxColor = new(200, 70, 200);
+    private static readonly Color BigBoxColor = new(210, 180, 140);
     private static readonly Color EraserColor = new(230, 90, 90);
 
     private readonly GraphicsDevice _device;
@@ -77,6 +78,10 @@ public class EditorRenderer
         session.World.Query(in portalBoxes, (ref PortalBox pb, ref GridPosition p) =>
             DrawTag(view, projection, grid, p, 1.1f, $"g{pb.Group}", PortalBoxColor));
 
+        var bigBoxes = new QueryDescription().WithAll<BigBox, GridPosition>();
+        session.World.Query(in bigBoxes, (ref BigBox b, ref GridPosition p) =>
+            DrawTag(view, projection, grid, p, 1.1f, b.Axis.ToString(), BigBoxColor));
+
         _spriteBatch.End();
     }
 
@@ -123,6 +128,7 @@ public class EditorRenderer
         (EditorBrush.Toggle, "[7]Toggle "),
         (EditorBrush.TimelessBase, "[8]Base "),
         (EditorBrush.PortalBox, "[9]Portal-cx "),
+        (EditorBrush.BigBox, "[B]CxGrande "),
         (EditorBrush.Eraser, "[0]Borracha"),
     };
 
@@ -140,7 +146,7 @@ public class EditorRenderer
         Line(x, ref y, lh, ("Mover: WASD + Q/E    Aplicar: Espaco    Apagar: Del", HintColor));
         Line(x, ref y, lh, ("Mouse: clique posiciona / repete aplica   Segurar+arrastar pinta   Botao dir: apaga   (camada Y: Q/E)", HintColor));
         DrawBrushKeys(x, ref y, lh, editor.Brush);
-        Line(x, ref y, lh, ("Caixa: [2] cicla tipo   [ ] grupo/alvo sob o cursor (ou do proximo)   Toggle: [7] inverte repouso   , . placas p/ acionar", HintColor));
+        Line(x, ref y, lh, ("Caixa: [2] cicla tipo   [ ] grupo/alvo sob o cursor (ou do proximo)   Toggle: [7] inverte repouso   , . placas p/ acionar   CxGrande: [B] inverte eixo", HintColor));
         Line(x, ref y, lh, ("Resize: Shift+WASD/Q/E    Salvar F5   Carregar F9   Novo N", HintColor));
         if (!string.IsNullOrEmpty(editor.Status))
             Line(x, ref y, lh, (editor.Status, StatusColor));
@@ -199,6 +205,7 @@ public class EditorRenderer
         EditorBrush.Toggle => $"Toggle (grupo {editor.Group}, {(editor.ToggleSolidByDefault ? "some ao pisar" : "aparece ao pisar")}, precisa {editor.ToggleThreshold} placa(s))",
         EditorBrush.TimelessBase => "Base atemporal (apaga o historico de quem pisa)",
         EditorBrush.PortalBox => $"Caixa portal (grupo {editor.Group})",
+        EditorBrush.BigBox => $"Caixa grande (eixo {editor.BigBoxAxis})",
         var b => b.ToString(),
     };
 
@@ -213,6 +220,7 @@ public class EditorRenderer
         EditorBrush.Toggle => ToggleColor,
         EditorBrush.TimelessBase => TimelessBaseColor,
         EditorBrush.PortalBox => PortalBoxColor,
+        EditorBrush.BigBox => BigBoxColor,
         EditorBrush.Eraser => EraserColor,
         _ => CursorColor,
     };
