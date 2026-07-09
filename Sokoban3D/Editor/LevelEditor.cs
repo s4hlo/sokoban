@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Serilog;
 using Sokoban3D.Core;
@@ -13,11 +16,18 @@ namespace Sokoban3D.Editor;
 /// design) e a cada mudança re-materializa a sessão ativa via <see cref="LevelManager.LoadLevel"/>
 /// — reaproveitando todo o ECS e o render do jogo. O cursor e o HUD ficam por conta do
 /// <see cref="EditorRenderer"/>; aqui mora o estado e a lógica de edição.
+///
+/// O mouse é a via principal: o picking acerta o bloco visível sob o ponteiro
+/// (<see cref="MousePicker.PickVoxel"/>) e o clique coloca na face apontada — esquerdo coloca
+/// (arrasto pinta na mesma camada), direito apaga, meio copia a brush do que está na célula,
+/// Ctrl+esquerdo move o conteúdo de uma célula, roda troca a camada Y. Toda mutação passa por
+/// snapshot pra Ctrl+Z/Ctrl+Y desfazer/refazer.
 /// </summary>
 public class LevelEditor
 {
     private const int MinSize = 1;
     private const int MaxSize = 32;
+    private const int MaxUndo = 100;
 
     private readonly LevelManager _levels;
     private readonly LevelRepository _repo;
@@ -27,6 +37,25 @@ public class LevelEditor
     private GameWorld _session;
     private KeyboardState _prev;
     private MouseState _prevMouse;
+
+    // Câmera/viewport do frame, pro picking do mouse (atualizados a cada Update).
+    private Viewport _viewport;
+    private Matrix _view;
+    private Matrix _projection;
+
+    // Undo/redo de edição: snapshots da receita inteira (níveis são pequenos, clonar é barato).
+    // Um arrasto de pintura conta como UMA edição: o snapshot é tirado no aperto do botão.
+    private readonly List<Level> _undoStack = new();
+    private readonly List<Level> _redoStack = new();
+
+    // Arrasto de pintura/borracha: camada Y travada no aperto do botão, senão pintar um bloco
+    // faria o raycast do frame seguinte acertar o topo dele e o arrasto subiria em escada.
+    private int? _dragY;
+    private bool _dragErase;
+
+    // Mover (Ctrl+arrasto): conteúdo extraído da célula de origem, esperando o drop.
+    private Level _grabbed;
+    private (int X, int Y, int Z) _grabbedFrom;
 
     // ----- Estado exposto pro renderer -----
     public int CursorX { get; private set; }
@@ -44,6 +73,10 @@ public class LevelEditor
     public int ToggleThreshold { get; private set; } = 1;
     public Level Working => _working;
     public string Status { get; private set; } = "";
+    /// <summary>True quando o status é um aviso (algo não deu certo) — o HUD colore diferente.</summary>
+    public bool StatusIsWarning { get; private set; }
+    /// <summary>True enquanto um Ctrl+arrasto carrega o conteúdo de uma célula.</summary>
+    public bool IsMoving => _grabbed != null;
 
     /// <summary>Disparado quando as dimensões do grid mudam (a câmera precisa reenquadrar).</summary>
     public event Action GridChanged;
@@ -66,10 +99,15 @@ public class LevelEditor
         _prev = keyboard;
         _prevMouse = mouse;
 
+        _undoStack.Clear();
+        _redoStack.Clear();
+        _dragY = null;
+        _grabbed = null;
+
         CursorX = _working.Width / 2;
         CursorZ = _working.Depth / 2;
         CursorY = Math.Min(1, _working.Height - 1);
-        Status = $"Editando \"{_working.Name}\"";
+        SetStatus($"Editando \"{_working.Name}\"");
 
         Rebuild();
         GridChanged?.Invoke();
@@ -81,85 +119,275 @@ public class LevelEditor
     /// </summary>
     public void Exit(GameWorld session)
     {
+        // Um move interrompido pelo Tab devolve o conteúdo pra origem (não pode evaporar).
+        if (_grabbed != null)
+        {
+            InsertCell(_grabbed, _grabbedFrom, _grabbedFrom);
+            _grabbed = null;
+        }
+
         session.CurrentLevel = _working;
         _levels.LoadLevel(session, _working);
         _working = null;
         _session = null;
     }
 
-    public void Update(GameWorld session, KeyboardState keyboard, MouseState mouse, (int X, int Z)? pickedCell, EditorBrush? brushButton)
+    public void Update(GameWorld session, KeyboardState keyboard, MouseState mouse,
+        Viewport viewport, Matrix view, Matrix projection, PaletteItem? hudBrush)
     {
         _session = session;
-        bool shift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
+        _viewport = viewport;
+        _view = view;
+        _projection = projection;
 
-        if (shift)
+        bool shift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
+        bool ctrl = keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
+
+        if (ctrl)
+            HandleShortcuts(keyboard);
+        else if (shift)
             HandleResize(keyboard);
         else
             HandleCursor(keyboard);
 
         HandleBrushSelection(keyboard);
-        HandlePlacement(keyboard);
-        HandleMouse(mouse, pickedCell, brushButton);
+        if (!ctrl)
+            HandlePlacement(keyboard);
+        HandleMouse(mouse, hudBrush, ctrl);
         HandleFiles(keyboard);
 
         _prev = keyboard;
         _prevMouse = mouse;
     }
 
+    // ----- Atalhos com Ctrl -----
+
+    private void HandleShortcuts(KeyboardState k)
+    {
+        if (Pressed(k, Keys.Z)) Undo();
+        if (Pressed(k, Keys.Y)) Redo();
+        if (Pressed(k, Keys.S)) SaveToDisk();
+    }
+
+    // ----- Undo / redo -----
+
+    /// <summary>Tira um snapshot da receita ANTES de uma mutação, pra o Ctrl+Z voltar a ela.</summary>
+    private void PushUndo()
+    {
+        _undoStack.Add(_working.Clone());
+        if (_undoStack.Count > MaxUndo)
+            _undoStack.RemoveAt(0);
+        _redoStack.Clear();
+    }
+
+    private void Undo()
+    {
+        if (_undoStack.Count == 0)
+        {
+            SetStatus("Nada para desfazer", warning: true);
+            return;
+        }
+        _redoStack.Add(_working);
+        _working = PopLast(_undoStack);
+        AfterHistoryJump("Desfeito");
+    }
+
+    private void Redo()
+    {
+        if (_redoStack.Count == 0)
+        {
+            SetStatus("Nada para refazer", warning: true);
+            return;
+        }
+        _undoStack.Add(_working);
+        _working = PopLast(_redoStack);
+        AfterHistoryJump("Refeito");
+    }
+
+    private void AfterHistoryJump(string what)
+    {
+        // Um move em andamento fica órfão: o snapshot restaurado já contém o item na origem.
+        _grabbed = null;
+        _dragY = null;
+        ClampCursor();
+        Rebuild();
+        GridChanged?.Invoke(); // as dimensões podem ter mudado junto
+        SetStatus(what);
+    }
+
+    private static Level PopLast(List<Level> stack)
+    {
+        var level = stack[^1];
+        stack.RemoveAt(stack.Count - 1);
+        return level;
+    }
+
     // ----- Mouse -----
 
     /// <summary>
-    /// Clique sobre a célula <paramref name="pickedCell"/> (na camada Y atual, calculada pelo
-    /// <see cref="Core.MousePicker"/>): o esquerdo move o cursor pra ela e, se já estava lá,
-    /// aplica a brush; o direito move o cursor e apaga. Clique fora do grid (cell null) é ignorado.
+    /// Toda a interação de mouse. O cursor segue o ponteiro (hover); esquerdo coloca a brush na
+    /// célula da face apontada e arrastando pinta (camada travada na do primeiro bloco); direito
+    /// apaga o que está sob o ponteiro; meio copia a brush (conta-gotas); Ctrl+esquerdo pega o
+    /// conteúdo da célula e solta onde o botão for liberado.
     /// </summary>
-    private void HandleMouse(MouseState mouse, (int X, int Z)? pickedCell, EditorBrush? brushButton)
+    private void HandleMouse(MouseState mouse, PaletteItem? hudBrush, bool ctrl)
     {
-        // Clique sobre um botão de brush do HUD troca a brush e consome o clique (não toca no grid).
-        if (brushButton is { } btn)
+        HandleWheel(mouse, ctrl);
+
+        bool mouseMoved = mouse.X != _prevMouse.X || mouse.Y != _prevMouse.Y;
+
+        // Um gesto em andamento (move/arrasto) tem prioridade sobre o HUD: soltar o botão em
+        // cima de um rótulo ainda encerra o gesto em vez de deixá-lo pendurado.
+
+        // Move em andamento: o cursor segue o ponteiro; soltar o botão larga o conteúdo.
+        if (_grabbed != null)
         {
-            if (LeftPressed(mouse))
-                SelectBrush(btn);
+            if (mouseMoved && PickVoxel(mouse) is { } follow)
+                MoveCursorTo(follow.Place ?? follow.Hit);
+            if (mouse.LeftButton == ButtonState.Released)
+                DropGrabbed();
             return;
         }
 
-        if (pickedCell is not { } cell)
-            return;
-
-        bool movedToNewCell = cell.X != CursorX || cell.Z != CursorZ;
-        bool leftDown = mouse.LeftButton == ButtonState.Pressed;
-        bool rightDown = mouse.RightButton == ButtonState.Pressed;
-
-        if (LeftPressed(mouse))
+        // Arrasto de pintura/borracha em andamento: picking travado na camada do início.
+        if (_dragY is int dragY)
         {
-            // Primeiro clique numa célula nova só posiciona o cursor; clicar de novo na célula
-            // onde ele já está confirma e aplica a brush.
-            MoveCursorTo(cell);
-            if (!movedToNewCell)
+            bool held = _dragErase
+                ? mouse.RightButton == ButtonState.Pressed
+                : mouse.LeftButton == ButtonState.Pressed;
+            if (!held)
             {
-                Apply();
+                _dragY = null;
+            }
+            else if (mouseMoved
+                && MousePicker.PickCell(_viewport, _view, _projection, mouse.X, mouse.Y, _session.Grid, dragY) is { } cell
+                && (cell.X != CursorX || dragY != CursorY || cell.Z != CursorZ))
+            {
+                MoveCursorTo((cell.X, dragY, cell.Z));
+                if (_dragErase)
+                    EraseCell(CursorX, CursorY, CursorZ);
+                else
+                    Apply();
                 Rebuild();
             }
+            return;
         }
-        else if (leftDown && movedToNewCell)
+
+        // Clique sobre um botão de brush do HUD troca a brush e consome o clique (não toca no grid).
+        if (hudBrush is { } btn)
         {
-            // Botão esquerdo segurado e arrastando pra uma célula nova: pinta enquanto move.
-            MoveCursorTo(cell);
+            if (LeftPressed(mouse))
+                SelectBrush(btn.Brush, btn.Box);
+            return;
+        }
+
+        var pick = PickVoxel(mouse);
+
+        // Hover: o cursor segue o ponteiro (o teclado segue valendo com o mouse parado).
+        if (mouseMoved && pick is { } hover)
+            MoveCursorTo(HoverCell(hover));
+
+        if (pick is not { } target)
+            return;
+
+        if (MiddlePressed(mouse))
+        {
+            EyedropAt(target);
+        }
+        else if (LeftPressed(mouse))
+        {
+            if (ctrl)
+            {
+                TryGrab(target);
+                return;
+            }
+
+            // A borracha mira a célula com conteúdo (como o botão direito); as demais brushes
+            // miram a célula vazia encostada na face apontada.
+            (int X, int Y, int Z)? cell = Brush == EditorBrush.Eraser ? ContentCell(target) : target.Place;
+            if (cell is not { } c)
+            {
+                SetStatus("Sem espaco na frente dessa face", warning: true);
+                return;
+            }
+            PushUndo();
+            MoveCursorTo(c);
             Apply();
             Rebuild();
+            _dragY = CursorY;
+            _dragErase = false;
         }
-        else if (RightPressed(mouse) || (rightDown && movedToNewCell))
+        else if (RightPressed(mouse))
         {
-            // Direito (clique ou arrasto) apaga a célula sob o ponteiro.
+            var cell = ContentCell(target);
+            PushUndo();
             MoveCursorTo(cell);
-            EraseCell(CursorX, CursorY, CursorZ);
+            EraseCell(cell.X, cell.Y, cell.Z);
             Rebuild();
+            _dragY = cell.Y;
+            _dragErase = true;
         }
     }
 
-    private void MoveCursorTo((int X, int Z) cell)
+    /// <summary>Roda do mouse: troca a camada Y do cursor; com Ctrl, ajusta o valor ([ ]).</summary>
+    private void HandleWheel(MouseState mouse, bool ctrl)
+    {
+        int ticks = (mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue) / 120;
+        if (ticks == 0)
+            return;
+
+        if (ctrl)
+        {
+            AdjustAtCursor(ticks);
+        }
+        else
+        {
+            CursorY += ticks;
+            ClampCursor();
+            SetStatus($"Camada Y = {CursorY}");
+        }
+    }
+
+    private VoxelPick? PickVoxel(MouseState mouse)
+        => MousePicker.PickVoxel(_viewport, _view, _projection, mouse.X, mouse.Y, _session.Grid, CursorY);
+
+    /// <summary>
+    /// Célula "com conteúdo" de um pick: a célula de colocação se algo mora nela (marcadores e
+    /// toggles não-sólidos ficam sobre a face apontada), senão o próprio sólido atingido. É o
+    /// alvo da borracha, do conta-gotas e do mover — apontar pra placa apaga a placa, apontar
+    /// pro chão nu apaga o bloco de chão.
+    /// </summary>
+    private (int X, int Y, int Z) ContentCell(VoxelPick pick)
+        => pick.Place is { } p && AnyAt(p.X, p.Y, p.Z) ? p : pick.Hit;
+
+    /// <summary>
+    /// Onde o cursor senta no hover: em cima do PRÓPRIO item atingido quando ele é do mesmo
+    /// tipo da brush ativa (apontar pra um toggle com a brush Toggle deixa [ ]/Ctrl+Roda
+    /// editarem ELE, não a célula acima); senão, na célula de colocação normal.
+    /// </summary>
+    private (int X, int Y, int Z) HoverCell(VoxelPick pick)
+        => BrushMatchesAt(pick.Hit.X, pick.Hit.Y, pick.Hit.Z) ? pick.Hit : pick.Place ?? pick.Hit;
+
+    /// <summary>True se a célula contém um item do mesmo tipo da brush ativa.</summary>
+    private bool BrushMatchesAt(int x, int y, int z) => Brush switch
+    {
+        EditorBrush.Obstacle => _working.ObstacleSpawns.Contains((x, y, z)),
+        EditorBrush.Box => _working.BoxSpawns.Any(b => b.X == x && b.Y == y && b.Z == z),
+        EditorBrush.Player => _working.PlayerSpawns.Contains((x, y, z)),
+        EditorBrush.Objective => _working.ObjectiveSpawns.Contains((x, y, z)),
+        EditorBrush.Portal => _working.PortalSpawns.Any(p => p.X == x && p.Y == y && p.Z == z),
+        EditorBrush.Plate => _working.PlateSpawns.Any(p => p.X == x && p.Y == y && p.Z == z),
+        EditorBrush.Toggle => _working.ToggleSpawns.Any(t => t.X == x && t.Y == y && t.Z == z),
+        EditorBrush.TimelessBase => _working.TimelessBaseSpawns.Contains((x, y, z)),
+        EditorBrush.PortalBox => _working.PortalBoxSpawns.Any(p => p.X == x && p.Y == y && p.Z == z),
+        EditorBrush.BigBox => _working.BigBoxSpawns.Any(b => BigBoxOccupies(b, x, y, z)),
+        _ => false,
+    };
+
+    private void MoveCursorTo((int X, int Y, int Z) cell)
     {
         CursorX = cell.X;
+        CursorY = cell.Y;
         CursorZ = cell.Z;
         ClampCursor();
     }
@@ -169,6 +397,186 @@ public class LevelEditor
 
     private bool RightPressed(MouseState m)
         => m.RightButton == ButtonState.Pressed && _prevMouse.RightButton == ButtonState.Released;
+
+    private bool MiddlePressed(MouseState m)
+        => m.MiddleButton == ButtonState.Pressed && _prevMouse.MiddleButton == ButtonState.Released;
+
+    // ----- Mover (Ctrl+arrasto) -----
+
+    /// <summary>
+    /// Pega o conteúdo da célula apontada: sai da receita (a cena re-materializa sem ele) e
+    /// fica "na mão" até o botão ser solto. O snapshot de undo é tirado aqui, então o move
+    /// inteiro (tirar + largar) desfaz de uma vez.
+    /// </summary>
+    private void TryGrab(VoxelPick pick)
+    {
+        var cell = ContentCell(pick);
+        if (!AnyAt(cell.X, cell.Y, cell.Z))
+        {
+            SetStatus("Nada aqui para mover", warning: true);
+            return;
+        }
+
+        PushUndo();
+        _grabbed = ExtractCell(cell.X, cell.Y, cell.Z);
+        _grabbedFrom = cell;
+        MoveCursorTo(cell);
+        Rebuild();
+        SetStatus("Movendo: solte o botao na celula de destino");
+    }
+
+    private void DropGrabbed()
+    {
+        var content = _grabbed;
+        _grabbed = null;
+
+        if (InsertCell(content, _grabbedFrom, (CursorX, CursorY, CursorZ)))
+        {
+            SetStatus($"Movido para ({CursorX},{CursorY},{CursorZ})");
+        }
+        else
+        {
+            InsertCell(content, _grabbedFrom, _grabbedFrom); // não coube: devolve pra origem
+            SetStatus("Nao coube no destino: item devolvido", warning: true);
+        }
+        Rebuild();
+    }
+
+    /// <summary>Remove tudo o que existe na célula e devolve num Level-clipboard (coords originais).</summary>
+    private Level ExtractCell(int x, int y, int z)
+    {
+        var c = new Level();
+        Take(_working.ObstacleSpawns, c.ObstacleSpawns, s => s == (x, y, z));
+        Take(_working.PlayerSpawns, c.PlayerSpawns, s => s == (x, y, z));
+        Take(_working.EnemySpawns, c.EnemySpawns, s => s == (x, y, z));
+        Take(_working.ObjectiveSpawns, c.ObjectiveSpawns, s => s == (x, y, z));
+        Take(_working.TimelessBaseSpawns, c.TimelessBaseSpawns, s => s == (x, y, z));
+        Take(_working.BoxSpawns, c.BoxSpawns, b => b.X == x && b.Y == y && b.Z == z);
+        Take(_working.PortalSpawns, c.PortalSpawns, p => p.X == x && p.Y == y && p.Z == z);
+        Take(_working.PlateSpawns, c.PlateSpawns, p => p.X == x && p.Y == y && p.Z == z);
+        Take(_working.ToggleSpawns, c.ToggleSpawns, t => t.X == x && t.Y == y && t.Z == z);
+        Take(_working.PortalBoxSpawns, c.PortalBoxSpawns, p => p.X == x && p.Y == y && p.Z == z);
+        // Caixa grande sai inteira mesmo pega pela segunda célula (a âncora vem junto).
+        Take(_working.BigBoxSpawns, c.BigBoxSpawns, b => BigBoxOccupies(b, x, y, z));
+        return c;
+    }
+
+    private static void Take<T>(List<T> from, List<T> to, Predicate<T> match)
+    {
+        to.AddRange(from.FindAll(match));
+        from.RemoveAll(match);
+    }
+
+    /// <summary>
+    /// Larga o conteúdo de <see cref="ExtractCell"/> transladado de <paramref name="from"/> pra
+    /// <paramref name="to"/>, esvaziando o destino antes (mover pra cima de algo substitui).
+    /// False (sem mexer em nada) se uma caixa grande não couber nos limites do destino.
+    /// </summary>
+    private bool InsertCell(Level content, (int X, int Y, int Z) from, (int X, int Y, int Z) to)
+    {
+        int dx = to.X - from.X, dy = to.Y - from.Y, dz = to.Z - from.Z;
+
+        foreach (var b in content.BigBoxSpawns)
+        {
+            var (ox, oz) = b.Axis == BigBoxAxis.X ? (1, 0) : (0, 1);
+            if (!InBounds(b.X + dx, b.Y + dy, b.Z + dz) || !InBounds(b.X + dx + ox, b.Y + dy, b.Z + dz + oz))
+                return false;
+        }
+
+        EraseCell(to.X, to.Y, to.Z);
+        foreach (var b in content.BigBoxSpawns)
+        {
+            var (ox, oz) = b.Axis == BigBoxAxis.X ? (1, 0) : (0, 1);
+            EraseCell(b.X + dx + ox, b.Y + dy, b.Z + dz + oz); // segunda célula da caixa grande
+        }
+
+        foreach (var s in content.ObstacleSpawns) _working.ObstacleSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
+        foreach (var s in content.PlayerSpawns) _working.PlayerSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
+        foreach (var s in content.EnemySpawns) _working.EnemySpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
+        foreach (var s in content.ObjectiveSpawns) _working.ObjectiveSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
+        foreach (var s in content.TimelessBaseSpawns) _working.TimelessBaseSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
+        foreach (var b in content.BoxSpawns) _working.BoxSpawns.Add((b.X + dx, b.Y + dy, b.Z + dz, b.Type));
+        foreach (var p in content.PortalSpawns) _working.PortalSpawns.Add((p.X + dx, p.Y + dy, p.Z + dz, p.LevelIndex, p.Completed));
+        foreach (var p in content.PlateSpawns) _working.PlateSpawns.Add((p.X + dx, p.Y + dy, p.Z + dz, p.Group));
+        foreach (var t in content.ToggleSpawns) _working.ToggleSpawns.Add((t.X + dx, t.Y + dy, t.Z + dz, t.Group, t.SolidByDefault, t.Threshold));
+        foreach (var p in content.PortalBoxSpawns) _working.PortalBoxSpawns.Add((p.X + dx, p.Y + dy, p.Z + dz, p.Group));
+        foreach (var b in content.BigBoxSpawns) _working.BigBoxSpawns.Add((b.X + dx, b.Y + dy, b.Z + dz, b.Axis));
+        return true;
+    }
+
+    // ----- Conta-gotas -----
+
+    /// <summary>
+    /// Vira a brush (e os parâmetros dela: tipo da caixa, alvo do portal, grupo, threshold,
+    /// eixo) no que existe na célula apontada — o jeito rápido de "editar mais um igual àquele".
+    /// </summary>
+    private void EyedropAt(VoxelPick pick)
+    {
+        var (x, y, z) = ContentCell(pick);
+        int i;
+
+        if ((i = _working.BoxSpawns.FindIndex(b => b.X == x && b.Y == y && b.Z == z)) >= 0)
+        {
+            Brush = EditorBrush.Box;
+            BoxType = _working.BoxSpawns[i].Type;
+        }
+        else if ((i = _working.PortalSpawns.FindIndex(p => p.X == x && p.Y == y && p.Z == z)) >= 0)
+        {
+            Brush = EditorBrush.Portal;
+            PortalTarget = _working.PortalSpawns[i].LevelIndex;
+        }
+        else if ((i = _working.PlateSpawns.FindIndex(p => p.X == x && p.Y == y && p.Z == z)) >= 0)
+        {
+            Brush = EditorBrush.Plate;
+            Group = _working.PlateSpawns[i].Group;
+        }
+        else if ((i = _working.ToggleSpawns.FindIndex(t => t.X == x && t.Y == y && t.Z == z)) >= 0)
+        {
+            Brush = EditorBrush.Toggle;
+            Group = _working.ToggleSpawns[i].Group;
+            ToggleSolidByDefault = _working.ToggleSpawns[i].SolidByDefault;
+            ToggleThreshold = _working.ToggleSpawns[i].Threshold;
+        }
+        else if ((i = _working.PortalBoxSpawns.FindIndex(p => p.X == x && p.Y == y && p.Z == z)) >= 0)
+        {
+            Brush = EditorBrush.PortalBox;
+            Group = _working.PortalBoxSpawns[i].Group;
+        }
+        else if ((i = _working.BigBoxSpawns.FindIndex(b => BigBoxOccupies(b, x, y, z))) >= 0)
+        {
+            Brush = EditorBrush.BigBox;
+            BigBoxAxis = _working.BigBoxSpawns[i].Axis;
+        }
+        else if (_working.PlayerSpawns.Contains((x, y, z)))
+            Brush = EditorBrush.Player;
+        else if (_working.ObjectiveSpawns.Contains((x, y, z)))
+            Brush = EditorBrush.Objective;
+        else if (_working.TimelessBaseSpawns.Contains((x, y, z)))
+            Brush = EditorBrush.TimelessBase;
+        else if (_working.ObstacleSpawns.Contains((x, y, z)))
+            Brush = EditorBrush.Obstacle;
+        else
+        {
+            SetStatus("Nada aqui para copiar", warning: true);
+            return;
+        }
+
+        SetStatus($"Brush copiada: {Brush}");
+    }
+
+    /// <summary>True se qualquer spawn da receita mora na célula (sólido ou marcador).</summary>
+    private bool AnyAt(int x, int y, int z)
+        => _working.ObstacleSpawns.Contains((x, y, z))
+        || _working.PlayerSpawns.Contains((x, y, z))
+        || _working.EnemySpawns.Contains((x, y, z))
+        || _working.ObjectiveSpawns.Contains((x, y, z))
+        || _working.TimelessBaseSpawns.Contains((x, y, z))
+        || _working.BoxSpawns.Any(b => b.X == x && b.Y == y && b.Z == z)
+        || _working.PortalSpawns.Any(p => p.X == x && p.Y == y && p.Z == z)
+        || _working.PlateSpawns.Any(p => p.X == x && p.Y == y && p.Z == z)
+        || _working.ToggleSpawns.Any(t => t.X == x && t.Y == y && t.Z == z)
+        || _working.PortalBoxSpawns.Any(p => p.X == x && p.Y == y && p.Z == z)
+        || _working.BigBoxSpawns.Any(b => BigBoxOccupies(b, x, y, z));
 
     // ----- Cursor -----
 
@@ -217,15 +625,25 @@ public class LevelEditor
         if (Pressed(k, Keys.OemPeriod)) AdjustThreshold(+1);
     }
 
-    /// <summary>
-    /// Seleciona a brush ativa. Reselecionar a Caixa cicla o tipo e reselecionar o Toggle inverte
-    /// o estado de repouso — mesmo comportamento das teclas [2]/[7], compartilhado com o clique
-    /// nos botões do HUD.
-    /// </summary>
-    private void SelectBrush(EditorBrush brush)
+    // Tipos de caixa oferecidos na paleta e no ciclo do [2]. Portal fica de fora: caixa
+    // portal é uma brush própria (com o pareamento por grupo).
+    private static readonly BoxType[] BoxCycle =
     {
-        if (brush == EditorBrush.Box && Brush == EditorBrush.Box)
-            BoxType = (BoxType)(((int)BoxType + 1) % Enum.GetValues<BoxType>().Length);
+        BoxType.Light, BoxType.Medium, BoxType.Heavy,
+        BoxType.Fragile, BoxType.Permanent, BoxType.Magnetic,
+    };
+
+    /// <summary>
+    /// Seleciona a brush ativa. O clique na paleta traz o tipo de caixa exato em
+    /// <paramref name="box"/>; sem ele (teclado), reselecionar a Caixa cicla o tipo,
+    /// reselecionar o Toggle inverte o estado de repouso e a CxGrande inverte o eixo.
+    /// </summary>
+    private void SelectBrush(EditorBrush brush, BoxType? box = null)
+    {
+        if (box is { } b)
+            BoxType = b;
+        else if (brush == EditorBrush.Box && Brush == EditorBrush.Box)
+            BoxType = BoxCycle[(Array.IndexOf(BoxCycle, BoxType) + 1) % BoxCycle.Length];
         else if (brush == EditorBrush.Toggle && Brush == EditorBrush.Toggle)
             ToggleSolidByDefault = !ToggleSolidByDefault;
         else if (brush == EditorBrush.BigBox && Brush == EditorBrush.BigBox)
@@ -249,6 +667,7 @@ public class LevelEditor
                 int pi = _working.PortalSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
                 if (pi >= 0)
                 {
+                    PushUndo();
                     var p = _working.PortalSpawns[pi];
                     p.LevelIndex = Math.Max(0, p.LevelIndex + delta);
                     _working.PortalSpawns[pi] = p;
@@ -261,6 +680,7 @@ public class LevelEditor
                 int li = _working.PlateSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
                 if (li >= 0)
                 {
+                    PushUndo();
                     var pl = _working.PlateSpawns[li];
                     pl.Group = Math.Max(0, pl.Group + delta);
                     _working.PlateSpawns[li] = pl;
@@ -273,6 +693,7 @@ public class LevelEditor
                 int pbi = _working.PortalBoxSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
                 if (pbi >= 0)
                 {
+                    PushUndo();
                     var pb = _working.PortalBoxSpawns[pbi];
                     pb.Group = Math.Max(0, pb.Group + delta);
                     _working.PortalBoxSpawns[pbi] = pb;
@@ -285,6 +706,7 @@ public class LevelEditor
                 int ti = _working.ToggleSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
                 if (ti >= 0)
                 {
+                    PushUndo();
                     var t = _working.ToggleSpawns[ti];
                     t.Group = Math.Max(0, t.Group + delta);
                     // Mudou de grupo: o threshold pode passar do nº de placas do novo grupo.
@@ -311,6 +733,7 @@ public class LevelEditor
         int ti = _working.ToggleSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
         if (ti >= 0)
         {
+            PushUndo();
             var t = _working.ToggleSpawns[ti];
             t.Threshold = ClampThreshold(t.Group, t.Threshold + delta);
             _working.ToggleSpawns[ti] = t;
@@ -332,11 +755,13 @@ public class LevelEditor
     {
         if (Pressed(k, Keys.Space))
         {
+            PushUndo();
             Apply();
             Rebuild();
         }
         else if (Pressed(k, Keys.Delete) || Pressed(k, Keys.Back))
         {
+            PushUndo();
             EraseCell(CursorX, CursorY, CursorZ);
             Rebuild();
         }
@@ -391,7 +816,7 @@ public class LevelEditor
                 int bx = x + ox, bz = z + oz;
                 if (bx < 0 || bx >= _working.Width || bz < 0 || bz >= _working.Depth)
                 {
-                    Status = "Caixa grande não cabe aqui (segunda célula fora do grid)";
+                    SetStatus("Caixa grande nao cabe aqui (segunda celula fora do grid)", warning: true);
                     break;
                 }
                 RemoveSolidsAt(x, y, z);
@@ -459,7 +884,7 @@ public class LevelEditor
             DropOutOfBounds();
             ClampCursor();
             Rebuild();
-            Status = $"Grid {_working.Width}x{_working.Height}x{_working.Depth}";
+            SetStatus($"Grid {_working.Width}x{_working.Height}x{_working.Depth}");
             GridChanged?.Invoke();
         }
     }
@@ -471,6 +896,7 @@ public class LevelEditor
         d = Math.Clamp(d, MinSize, MaxSize);
         if (w == _working.Width && h == _working.Height && d == _working.Depth)
             return false;
+        PushUndo();
         _working.Width = w;
         _working.Height = h;
         _working.Depth = d;
@@ -480,8 +906,7 @@ public class LevelEditor
     /// <summary>Remove spawns que caíram fora dos novos limites depois de encolher o grid.</summary>
     private void DropOutOfBounds()
     {
-        bool Out(int x, int y, int z) =>
-            x < 0 || x >= _working.Width || y < 0 || y >= _working.Height || z < 0 || z >= _working.Depth;
+        bool Out(int x, int y, int z) => !InBounds(x, y, z);
 
         _working.ObstacleSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.BoxSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
@@ -499,6 +924,9 @@ public class LevelEditor
             return Out(c.X, c.Y, c.Z) || Out(c.X + ox, c.Y, c.Z + oz);
         });
     }
+
+    private bool InBounds(int x, int y, int z)
+        => x >= 0 && x < _working.Width && y >= 0 && y < _working.Height && z >= 0 && z < _working.Depth;
 
     // ----- Arquivos -----
 
@@ -519,9 +947,9 @@ public class LevelEditor
         // pra o portal não levar a um arquivo inexistente (BuildLevel falharia ao entrar).
         int created = CreateMissingPortalTargets();
 
-        Status = created > 0
+        SetStatus(created > 0
             ? $"Salvo: {path} (+{created} mapa(s) novo(s))"
-            : $"Salvo: {path}";
+            : $"Salvo: {path}");
         Log.Information("Editor: nivel salvo em {Path}", path);
     }
 
@@ -548,27 +976,29 @@ public class LevelEditor
     {
         if (!_repo.Exists(_working.Id))
         {
-            Status = $"Sem arquivo: {_repo.PathFor(_working.Id)}";
+            SetStatus($"Sem arquivo: {_repo.PathFor(_working.Id)}", warning: true);
             return;
         }
 
+        PushUndo();
         _working = _repo.Load(_working.Id);
         ClampCursor();
         Rebuild();
-        Status = $"Carregado: {_repo.PathFor(_working.Id)}";
+        SetStatus($"Carregado: {_repo.PathFor(_working.Id)}");
         GridChanged?.Invoke();
         Log.Information("Editor: nivel carregado de {Path}", _repo.PathFor(_working.Id));
     }
 
     private void NewBlank()
     {
+        PushUndo();
         int id = _working.Id;
         _working = BlankLevel(id);
         CursorX = _working.Width / 2;
         CursorZ = _working.Depth / 2;
         CursorY = 1;
         Rebuild();
-        Status = "Novo nivel em branco";
+        SetStatus("Novo nivel em branco");
         GridChanged?.Invoke();
     }
 
@@ -578,6 +1008,12 @@ public class LevelEditor
         level.FillFloor();
         level.PlayerSpawns.Add((4, 1, 4));
         return level;
+    }
+
+    private void SetStatus(string text, bool warning = false)
+    {
+        Status = text;
+        StatusIsWarning = warning;
     }
 
     private void Rebuild() => _levels.LoadLevel(_session, _working);

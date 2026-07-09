@@ -237,7 +237,8 @@ public class RenderSystem
         }
     }
 
-    private static Color ColorOf(BoxType type) => type switch
+    /// <summary>Cor de cada tipo de caixa — compartilhada com a paleta do editor.</summary>
+    public static Color ColorOf(BoxType type) => type switch
     {
         BoxType.Light => LightBoxColor,
         BoxType.Medium => MediumBoxColor,

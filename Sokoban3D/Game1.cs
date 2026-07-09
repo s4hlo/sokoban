@@ -108,13 +108,11 @@ public class Game1 : Game
             // No editor os sistemas de jogo ficam pausados; só o editor processa input.
             if (!toggled)
             {
-                // Célula sob o ponteiro na camada Y atual do cursor (null fora do grid) e botão
-                // de brush do HUD sob o ponteiro (null se não estiver sobre nenhum).
-                var picked = MousePicker.PickCell(
-                    GraphicsDevice.Viewport, _camera.View, _camera.Projection,
-                    mouse.X, mouse.Y, Active.Grid, _editor.CursorY);
+                // O editor faz o próprio picking (raycast contra a cena); daqui vai só a câmera
+                // e o botão de brush do HUD sob o ponteiro (null se não estiver sobre nenhum).
                 var brushButton = _editorRenderer.HitTestBrush(mouse.X, mouse.Y);
-                _editor.Update(Active, keyboard, mouse, picked, brushButton);
+                _editor.Update(Active, keyboard, mouse,
+                    GraphicsDevice.Viewport, _camera.View, _camera.Projection, brushButton);
             }
             _previousKeyboard = keyboard;
             base.Update(gameTime);
