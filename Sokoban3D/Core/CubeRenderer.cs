@@ -63,8 +63,15 @@ public class CubeRenderer
     /// Desenha um cubo na posição informada, com a escala e cor dadas.
     /// </summary>
     public void Draw(Vector3 position, Vector3 scale, Color color, Matrix view, Matrix projection)
+        => Draw(Matrix.CreateScale(scale) * Matrix.CreateTranslation(position), color, view, projection);
+
+    /// <summary>
+    /// Desenha um cubo com a matriz de mundo completa — pra quem precisa de rotação (ex.: o
+    /// nariz do player girando com o yaw visual), além de escala/posição.
+    /// </summary>
+    public void Draw(Matrix world, Color color, Matrix view, Matrix projection)
     {
-        _effect.World = Matrix.CreateScale(scale) * Matrix.CreateTranslation(position);
+        _effect.World = world;
         _effect.View = view;
         _effect.Projection = projection;
         _effect.DiffuseColor = color.ToVector3();

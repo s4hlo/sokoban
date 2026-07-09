@@ -135,6 +135,8 @@ public class LevelManager
             var entity = session.World.Create(
                 new GridPosition(x, y, z),
                 new Player { Speed = 1f },
+                Facing.Default,
+                new RenderFacing { Yaw = Facing.Default.Yaw },
                 new SpawnPosition(x, y, z),
                 new RenderPosition(GridView.ToWorld(session.Grid, x, y, z, GridView.PieceRise)),
                 new Solid()
@@ -313,6 +315,11 @@ public class LevelManager
 
         foreach (var e in toResolidify)
             session.World.Add(e, new Solid());
+
+        // O olhar do player volta ao default do spawn. A rotação não entra no histórico,
+        // então o reverso (Z) do restart não a desfaz — só as posições.
+        var players = new QueryDescription().WithAll<Player, Facing>();
+        session.World.Query(in players, (ref Facing f) => f = Facing.Default);
 
         // Blocos toggle voltam ao repouso (o Clear acima zerou a ocupação deles) e re-derivam
         // pelas placas — uma peça pode ter voltado a um spawn que fica sobre uma placa.

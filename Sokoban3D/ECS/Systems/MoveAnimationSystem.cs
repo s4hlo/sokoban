@@ -25,6 +25,11 @@ public class MoveAnimationSystem
     // Duração total da animação de teleporte (entra no portal + sai do parceiro), em segundos.
     private const float TeleportDuration = 0.24f;
 
+    // Suavização do giro do olhar (yaw). Um pouco mais lenta que o deslize pra o giro do
+    // nariz ser visível em vez de estalar.
+    private const float RotationSmoothing = 14f;
+    private const float SnapAngle = 0.002f; // radianos: perto o bastante pra encaixar
+
     // Teleportes que terminaram neste frame: o TeleportAnim é removido após a query (mudança
     // estrutural não pode rodar durante a iteração). Campo pra não realocar a cada frame.
     private readonly List<Entity> _finishedTeleports = new();
@@ -32,6 +37,7 @@ public class MoveAnimationSystem
     public void Update(GameWorld session, float deltaSeconds)
     {
         UpdateTeleports(session, deltaSeconds);
+        UpdateFacing(session, deltaSeconds);
 
         float t = 1f - MathF.Exp(-Smoothing * deltaSeconds);
 
@@ -59,6 +65,28 @@ public class MoveAnimationSystem
             // Encaixa quando já está praticamente no lugar, pra não ficar derivando pra sempre.
             if (Vector3.DistanceSquared(render.Value, target) < SnapDistanceSq)
                 render.Value = target;
+        });
+    }
+
+    /// <summary>
+    /// Gira o yaw visual (<see cref="RenderFacing"/>) em direção ao ângulo do <see cref="Facing"/>
+    /// lógico, sempre pelo arco mais curto (WrapAngle), com a mesma suavização exponencial do
+    /// deslize. É o que anima o giro do nariz quando o olhar muda.
+    /// </summary>
+    private static void UpdateFacing(GameWorld session, float deltaSeconds)
+    {
+        float t = 1f - MathF.Exp(-RotationSmoothing * deltaSeconds);
+
+        var query = new QueryDescription().WithAll<Facing, RenderFacing>();
+        session.World.Query(in query, (ref Facing f, ref RenderFacing r) =>
+        {
+            float diff = MathHelper.WrapAngle(f.Yaw - r.Yaw);
+            if (MathF.Abs(diff) < SnapAngle)
+            {
+                r.Yaw = f.Yaw;
+                return;
+            }
+            r.Yaw = MathHelper.WrapAngle(r.Yaw + diff * t);
         });
     }
 
@@ -122,5 +150,9 @@ public class MoveAnimationSystem
         {
             render.Value = GridView.ToWorld(session.Grid, grid.X, grid.Y, grid.Z, GridView.PieceRise);
         });
+
+        // O olhar também encaixa sem interpolar.
+        var facings = new QueryDescription().WithAll<Facing, RenderFacing>();
+        session.World.Query(in facings, (ref Facing f, ref RenderFacing r) => r.Yaw = f.Yaw);
     }
 }

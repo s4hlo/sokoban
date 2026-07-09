@@ -17,6 +17,16 @@ public struct RenderPosition
 }
 
 /// <summary>
+/// Yaw visual (radianos) do olhar da entidade, interpolado suavemente em direção ao ângulo do
+/// <see cref="Facing"/> lógico — o análogo rotacional do <see cref="RenderPosition"/>. É ele que
+/// dá a animação de giro do nariz; a lógica continua lendo só o <see cref="Facing"/>.
+/// </summary>
+public struct RenderFacing
+{
+    public float Yaw;
+}
+
+/// <summary>
 /// Animação transitória de teleporte: enquanto presente, o <see cref="RenderPosition"/> da peça
 /// é dirigido em duas fases — desliza de <see cref="Start"/> pra dentro do portal de entrada
 /// (<see cref="Entry"/>), some, e brota do portal de saída (<see cref="Exit"/>) deslizando até a

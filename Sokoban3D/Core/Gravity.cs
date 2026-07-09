@@ -27,12 +27,25 @@ public static class Gravity
         var query = new QueryDescription().WithAll<GridPosition, SpawnPosition, Solid>();
         world.World.Query(in query, (Entity e) => movers.Add(e));
 
-        // Assenta de baixo pra cima: o apoio pousa antes do que repousa sobre ele.
+        // Assenta de baixo pra cima: o apoio pousa antes do que repousa sobre ele. Empate de Y
+        // processa o player primeiro — se ele cair, o grude magnético já não existe quando a vez
+        // da caixa chegar, e ela cai junto em vez de ficar pairando órfã.
         movers.Sort((a, b) =>
-            world.World.Get<GridPosition>(a).Y.CompareTo(world.World.Get<GridPosition>(b).Y));
+        {
+            int ya = world.World.Get<GridPosition>(a).Y;
+            int yb = world.World.Get<GridPosition>(b).Y;
+            if (ya != yb)
+                return ya.CompareTo(yb);
+            return world.World.Has<Player>(b).CompareTo(world.World.Has<Player>(a));
+        });
 
         foreach (var e in movers)
         {
+            // Caixa magnética grudada no player não cai: o grude a segura, mesmo pairando
+            // sobre um buraco. Checado na hora, já refletindo quedas anteriores.
+            if (Magnetism.IsHeld(world, e))
+                continue;
+
             var pos = world.World.Get<GridPosition>(e);
             int ny = pos.Y;
             while (!world.Grid.IsOccupied(pos.X, ny - 1, pos.Z))

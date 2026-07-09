@@ -19,6 +19,9 @@ public class RenderSystem
     private static readonly Color PlayerColor = new(70, 130, 220);
     // Player caído (congelado no chão-morte): avermelhado pra sinalizar a morte.
     private static readonly Color PlayerFellColor = new(200, 70, 70);
+    // "Nariz" do player: cubinho claro na face pra onde ele olha (essencial com caixa magnética
+    // grudada, quando o olhar decide se um comando anda ou gira).
+    private static readonly Color PlayerNoseColor = new(230, 238, 250);
 
     // Meta do nível (dourado) e portais para níveis filhos (ciano; verde quando concluído).
     private static readonly Color ObjectiveColor = new(235, 200, 70);
@@ -43,6 +46,8 @@ public class RenderSystem
     private static readonly Color PermanentBoxColor = new(60, 170, 75);
     // Caixa portal: magenta vivo, pra não se confundir com o tile ciano dos portais de nível.
     private static readonly Color PortalBoxColor = new(200, 70, 200);
+    // Caixa magnética: aço azulado, meio-termo entre as caixas de madeira e o player azul.
+    private static readonly Color MagneticBoxColor = new(140, 160, 185);
 
     // Sessão ativa do frame. O CubeRenderer (preso ao device) é reutilizado entre sessões
     // e compartilhado com o editor — por isso vem injetado, não criado aqui.
@@ -176,11 +181,20 @@ public class RenderSystem
         var boxScale = Vector3.One;
 
         var playerColor = _world.PlayerFell ? PlayerFellColor : PlayerColor;
-        var players = new QueryDescription().WithAll<Player, RenderPosition>();
-        _world.World.Query(in players, (ref RenderPosition r) =>
+        var players = new QueryDescription().WithAll<Player, RenderPosition, RenderFacing>();
+        _world.World.Query(in players, (ref RenderPosition r, ref RenderFacing rf) =>
         {
             _cubes.Draw(r.Value, playerScale, playerColor, view, projection);
+
+            // O nariz é modelado no espaço local do player olhando pra Z+ e girado pelo yaw
+            // VISUAL (interpolado pelo MoveAnimationSystem) — é isso que anima o giro do olhar.
+            // Fica na face do olhar (offset 0.4 = a face do cubo de escala 0.8), metade pra fora.
+            var rotation = Matrix.CreateRotationY(rf.Yaw) * Matrix.CreateTranslation(r.Value);
+            var nose = Matrix.CreateScale(0.24f) * Matrix.CreateTranslation(0f, 0.12f, 0.4f) * rotation;
+            _cubes.Draw(nose, PlayerNoseColor, view, projection);
         });
+
+        DrawMagnetLinks(view, projection);
 
         // Só caixas com Solid: as quebradas perdem o tag e somem naturalmente da query.
         var boxes = new QueryDescription().WithAll<Box, RenderPosition, Solid>();
@@ -188,6 +202,28 @@ public class RenderSystem
         {
             _cubes.Draw(r.Value, boxScale, ColorOf(b.Type), view, projection);
         });
+    }
+
+    /// <summary>
+    /// Elo do grude magnético: um cubinho claro na junta entre o player e cada caixa magnética
+    /// grudada (derivado da adjacência lógica, ver <see cref="Magnetism"/>), no ponto médio das
+    /// posições VISUAIS — acompanha o deslize das duas peças durante as animações.
+    /// </summary>
+    private void DrawMagnetLinks(Matrix view, Matrix projection)
+    {
+        var player = _world.Spatial.First<Player>();
+        if (player is null || !_world.World.Has<RenderPosition>(player.Value))
+            return;
+        var pr = _world.World.Get<RenderPosition>(player.Value).Value;
+
+        var linkScale = new Vector3(0.22f);
+        foreach (var (box, _, _) in Magnetism.Attached(_world))
+        {
+            if (!_world.World.Has<RenderPosition>(box))
+                continue;
+            var br = _world.World.Get<RenderPosition>(box).Value;
+            _cubes.Draw((pr + br) * 0.5f, linkScale, PlayerNoseColor, view, projection);
+        }
     }
 
     private static Color ColorOf(BoxType type) => type switch
@@ -198,6 +234,7 @@ public class RenderSystem
         BoxType.Fragile => FragileBoxColor,
         BoxType.Permanent => PermanentBoxColor,
         BoxType.Portal => PortalBoxColor,
+        BoxType.Magnetic => MagneticBoxColor,
         _ => MediumBoxColor,
     };
 }

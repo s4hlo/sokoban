@@ -12,6 +12,12 @@ namespace Sokoban3D.ECS.Systems;
 /// O empurrão é resolvido recursivamente célula a célula: cada caixa só anda se a
 /// célula à frente puder ser liberada e ainda houver "força" (peso) sobrando. Uma
 /// caixa frágil que não consegue avançar quebra em vez de bloquear.
+///
+/// SEM caixa magnética grudada (ver <see cref="Magnetism"/>), o movimento é livre: cada comando
+/// anda direto na direção apertada e o olhar só acompanha. COM alguma grudada, o player vira um
+/// corpo rígido (ele + as caixas, estilo Stephen's Sausage Roll): comando alinhado com o olhar
+/// (de frente ou de costas) translada o corpo inteiro — as caixas grudadas empurram o que
+/// encontram —; comando perpendicular GIRA o corpo, com as caixas varrendo o arco.
 /// </summary>
 public class MovementSystem
 {
@@ -28,6 +34,11 @@ public class MovementSystem
     // Peças que atravessaram um portal no turno atual, mapeadas pras posições de mundo dos portais
     // de entrada e saída — usadas pra montar a animação de teleporte. Reusado a cada jogada.
     private readonly Dictionary<Entity, (Vector3 Entry, Vector3 Exit)> _teleported = new();
+
+    // True se algum PushInto da jogada atual de fato mutou o mundo (moveu ou quebrou uma caixa).
+    // As jogadas de corpo magnético usam isto pra saber se uma tentativa TRAVADA chegou a mexer
+    // em algo — se sim, ainda é um turno de verdade (gravidade + histórico).
+    private bool _pushMutated;
 
     public void Update(GameWorld session, KeyboardState keyboard)
     {
@@ -53,7 +64,27 @@ public class MovementSystem
         if (player is null)
             return;
 
+        var facing = _world.World.Get<Facing>(player.Value);
         var pos = _world.World.Get<GridPosition>(player.Value);
+
+        // Caixas magnéticas grudadas (derivado da adjacência, nada é armazenado): com alguma,
+        // o player vira corpo rígido e anda em modo tanque; sem nenhuma, movimento livre.
+        var magnets = Magnetism.Attached(_world);
+        if (magnets.Count > 0)
+        {
+            bool aligned = (dx == facing.Dx && dz == facing.Dz) || (dx == -facing.Dx && dz == -facing.Dz);
+            if (aligned)
+                TryMoveBody(player.Value, pos, magnets, dx, dz);
+            else
+                TryRotateBody(player.Value, pos, facing, magnets, dx, dz);
+            return;
+        }
+
+        // Livre: o olhar acompanha o comando (mesmo que o passo esbarre e não saia do lugar)
+        // e o passo é direto em qualquer direção.
+        if (!(dx == facing.Dx && dz == facing.Dz))
+            _world.World.Set(player.Value, new Facing { Dx = dx, Dz = dz });
+
         TryMovePlayer(player.Value, pos, dx, dz);
     }
 
@@ -86,6 +117,143 @@ public class MovementSystem
 
         _world.Move(player, playerTo.Value);
 
+        SettleAndCommit(player, before);
+    }
+
+    /// <summary>
+    /// Translação do corpo rígido (player + caixas magnéticas grudadas) na direção alinhada com o
+    /// olhar (frente ou ré). O corpo inteiro é erguido do grid primeiro — o movimento é simultâneo
+    /// e o destino de uma peça costuma ser a célula que outra está liberando —, então cada peça
+    /// resolve sua célula nova com o PushInto (livre, empurrando, quebrando frágil). Qualquer peça
+    /// bloqueada trava o corpo inteiro. Portal não passa corpo rígido: um PushInto que redireciona
+    /// (landing fora do alvo) conta como bloqueio.
+    /// </summary>
+    private void TryMoveBody(Entity player, GridPosition pos, List<(Entity Box, int Ox, int Oz)> magnets, int dx, int dz)
+    {
+        var before = Snapshot();
+        _teleported.Clear();
+        _pushMutated = false;
+
+        _world.Vacate(player);
+        foreach (var (box, _, _) in magnets)
+            _world.Vacate(box);
+
+        var pieces = new List<(Entity E, GridPosition To)>
+        {
+            (player, new GridPosition(pos.X + dx, pos.Y, pos.Z + dz)),
+        };
+        foreach (var (box, ox, oz) in magnets)
+            pieces.Add((box, new GridPosition(pos.X + ox + dx, pos.Y, pos.Z + oz + dz)));
+
+        bool ok = true;
+        foreach (var (_, to) in pieces)
+        {
+            var landing = PushInto(to.X, to.Y, to.Z, dx, dz, PlayerPushStrength, new HashSet<Entity>());
+            if (landing is null || landing.Value.X != to.X || landing.Value.Y != to.Y || landing.Value.Z != to.Z)
+            {
+                ok = false;
+                break;
+            }
+        }
+
+        if (!ok)
+        {
+            // Corpo travado: todo mundo volta a ocupar onde estava. O que uma peça JÁ empurrou
+            // antes do bloqueio fica empurrado — se algo mudou, ainda é um turno.
+            foreach (var (e, _) in pieces)
+                _world.Occupy(e);
+            if (_pushMutated)
+                SettleAndCommit(player, before);
+            return;
+        }
+
+        foreach (var (e, to) in pieces)
+        {
+            _world.World.Set(e, to);
+            _world.Occupy(e);
+        }
+
+        SettleAndCommit(player, before);
+    }
+
+    /// <summary>
+    /// Giro do corpo rígido: comando perpendicular ao olhar. O player não muda de célula; cada
+    /// caixa grudada varre um quarto de volta ao redor dele — da célula atual até a girada,
+    /// passando pela diagonal — empurrando o que estiver no caminho na direção tangente do arco.
+    /// Parede ou peça imóvel em qualquer célula varrida trava o giro inteiro (o olhar não muda),
+    /// mas o que a varredura JÁ empurrou fica empurrado. Como as caixas do corpo mudam de célula,
+    /// um giro bem-sucedido é sempre um turno de verdade (gravidade + histórico).
+    /// </summary>
+    private void TryRotateBody(Entity player, GridPosition pos, Facing f, List<(Entity Box, int Ox, int Oz)> magnets, int dx, int dz)
+    {
+        // O quarto de volta que leva o olhar de f até (dx,dz). ccw = (x,z)→(-z,x); senão (z,-x).
+        bool ccw = -f.Dz == dx && f.Dx == dz;
+        (int X, int Z) Rot(int x, int z) => ccw ? (-z, x) : (z, -x);
+
+        var before = Snapshot();
+        _teleported.Clear();
+        _pushMutated = false;
+
+        // Giro simultâneo: ergue as caixas do corpo antes, pra célula antiga de uma não bloquear
+        // a varredura da outra.
+        foreach (var (box, _, _) in magnets)
+            _world.Vacate(box);
+
+        var landings = new List<(Entity Box, GridPosition To)>();
+        bool ok = true;
+        foreach (var (box, ox, oz) in magnets)
+        {
+            var (nx, nz) = Rot(ox, oz);
+            int diagX = pos.X + ox + nx, diagZ = pos.Z + oz + nz; // por onde a caixa passa
+            int destX = pos.X + nx, destZ = pos.Z + nz;           // onde ela assenta
+
+            // A diagonal é varrida na direção do giro; o destino, pra "trás" do offset antigo.
+            // As duas células precisam FICAR livres (redirecionamento de portal não serve).
+            var atDiag = PushInto(diagX, pos.Y, diagZ, nx, nz, PlayerPushStrength, new HashSet<Entity>());
+            if (atDiag is null || atDiag.Value.X != diagX || atDiag.Value.Y != pos.Y || atDiag.Value.Z != diagZ)
+            {
+                ok = false;
+                break;
+            }
+
+            var atDest = PushInto(destX, pos.Y, destZ, -ox, -oz, PlayerPushStrength, new HashSet<Entity>());
+            if (atDest is null || atDest.Value.X != destX || atDest.Value.Y != pos.Y || atDest.Value.Z != destZ)
+            {
+                ok = false;
+                break;
+            }
+
+            landings.Add((box, new GridPosition(destX, pos.Y, destZ)));
+        }
+
+        if (!ok)
+        {
+            // Giro travado: as caixas voltam a ocupar onde estavam (não chegaram a mudar de
+            // célula). O que a varredura já empurrou fica — se algo mudou, ainda é um turno.
+            foreach (var (box, _, _) in magnets)
+                _world.Occupy(box);
+            if (_pushMutated)
+                SettleAndCommit(player, before);
+            return;
+        }
+
+        foreach (var (box, to) in landings)
+        {
+            _world.World.Set(box, to);
+            _world.Occupy(box);
+        }
+        _world.World.Set(player, new Facing { Dx = dx, Dz = dz });
+
+        SettleAndCommit(player, before);
+    }
+
+    /// <summary>
+    /// Pós-jogada comum a passo livre, translação e giro do corpo magnético: assenta a gravidade,
+    /// re-deriva as placas, dispara animações de teleporte, grava o turno e aplica os efeitos
+    /// de célula (placa atemporal, chão-morte).
+    /// </summary>
+    private void SettleAndCommit(Entity player, Dictionary<Entity, (GridPosition Pos, bool Solid)> before)
+    {
         // Gravidade: tudo que ficou sem apoio cai até pousar — peças empurradas e também as
         // pilhas que perderam o apoio (ex.: caixa em cima do player quando ele sai de baixo).
         Gravity.Settle(_world);
@@ -216,6 +384,7 @@ public class MovementSystem
             // havia um portal lá). A verde move normalmente; o CommitTurn não a grava (excluída do
             // snapshot), então o undo não a reverte — só o R.
             _world.Move(occ, boxLanding.Value);
+            _pushMutated = true;
             return new GridPosition(x, y, z); // quem vinha ocupa a célula liberada
         }
 
@@ -344,6 +513,7 @@ public class MovementSystem
     {
         _world.Vacate(entity);
         _world.World.Remove<Solid>(entity);
+        _pushMutated = true;
     }
 
     /// <summary>

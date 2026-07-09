@@ -9,6 +9,26 @@ public struct Player
 }
 
 /// <summary>
+/// Direção pra onde o player está olhando, no plano X/Z (vetor cardinal unitário). Livre de
+/// caixas magnéticas, só acompanha o último comando; com alguma grudada (ver
+/// <see cref="Core.Magnetism"/>) é quem decide se um comando anda (alinhado) ou gira o corpo.
+/// </summary>
+public struct Facing
+{
+    public int Dx;
+    public int Dz;
+
+    /// <summary>
+    /// O olhar como ângulo de yaw (radianos), na convenção do Matrix.CreateRotationY: o
+    /// "frente" local (0,0,1) rotacionado por Yaw aponta pra (Dx, 0, Dz). Zero = Z+.
+    /// </summary>
+    public float Yaw => System.MathF.Atan2(Dx, Dz);
+
+    /// <summary>Olhar inicial do spawn: Z+ (a direção da tecla S).</summary>
+    public static Facing Default => new() { Dx = 0, Dz = 1 };
+}
+
+/// <summary>
 /// Tipos de caixa. O peso determina quanto "esforço" o player gasta pra empurrar.
 /// </summary>
 public enum BoxType
@@ -19,6 +39,7 @@ public enum BoxType
     Fragile, // frágil: empurra como leve, mas quebra se for contra algo que não move
     Permanent, // verde: empurra como leve, mas o reverso não a desfaz (só o R volta ela)
     Portal,  // teleporta quem tenta entrar nela pro lado oposto do portal parceiro (mesmo Group)
+    Magnetic, // gruda no player que encostar (ver Core.Magnetism): vira parte do corpo dele
 }
 
 /// <summary>
@@ -44,6 +65,7 @@ public static class BoxRules
         BoxType.Fragile => 0,
         BoxType.Permanent => 0, // mesmo peso da leve (empurra de graça)
         BoxType.Portal => 0,    // empurrada de graça (só quando a saída está bloqueada)
+        BoxType.Magnetic => 1,  // solta, empurra como média; grudada não é empurrável (é corpo)
         _ => 1,
     };
 }
