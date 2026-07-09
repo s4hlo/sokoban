@@ -5,9 +5,11 @@ using Sokoban3D.ECS.Components;
 namespace Sokoban3D.Core;
 
 /// <summary>
-/// Gravidade compartilhada: cada peça desce enquanto a célula logo abaixo estiver vazia,
-/// parando ao encontrar obstáculo, caixa ou o limite inferior do grid (o chão-morte).
-/// Processa de baixo pra cima pra que apoios assentem antes do que está sobre eles.
+/// Gravidade compartilhada: "se der pra cair, cai". Assenta TODAS as peças móveis do mundo —
+/// cada uma desce enquanto a célula logo abaixo estiver vazia, parando ao encontrar obstáculo,
+/// caixa ou o limite inferior do grid (o chão-morte). Processa de baixo pra cima pra que apoios
+/// assentem antes do que está sobre eles. Não precisa saber quem se moveu nem quem perdeu o
+/// apoio: quem já está apoiado simplesmente não desce.
 ///
 /// É usada tanto pelo empurrão do player (<see cref="ECS.Systems.MovementSystem"/>) quanto
 /// pelo bloco que some sob uma peça (<see cref="ECS.Systems.PressurePlateSystem"/>). A queda só
@@ -16,27 +18,28 @@ namespace Sokoban3D.Core;
 /// </summary>
 public static class Gravity
 {
-    public static void Apply(GameWorld world, List<Entity> movers)
+    public static void Settle(GameWorld world)
     {
+        // Toda peça móvel que ocupa o grid é candidata (player, caixas, inimigos). Obstáculos e
+        // toggles não têm SpawnPosition — são terreno, não caem. Coleta antes de mover: o Move
+        // muta o grid, o que não pode acontecer durante a iteração da query.
+        var movers = new List<Entity>();
+        var query = new QueryDescription().WithAll<GridPosition, SpawnPosition, Solid>();
+        world.World.Query(in query, (Entity e) => movers.Add(e));
+
         // Assenta de baixo pra cima: o apoio pousa antes do que repousa sobre ele.
         movers.Sort((a, b) =>
             world.World.Get<GridPosition>(a).Y.CompareTo(world.World.Get<GridPosition>(b).Y));
 
         foreach (var e in movers)
         {
-            if (!world.World.Has<Solid>(e))
-                continue; // peça que deixou de ocupar o grid (ex.: frágil quebrada) não cai
-
             var pos = world.World.Get<GridPosition>(e);
             int ny = pos.Y;
             while (!world.Grid.IsOccupied(pos.X, ny - 1, pos.Z))
                 ny--;
 
-            if (ny == pos.Y)
-                continue;
-
-            var to = new GridPosition(pos.X, ny, pos.Z);
-            world.Move(e, to);
+            if (ny != pos.Y)
+                world.Move(e, new GridPosition(pos.X, ny, pos.Z));
         }
     }
 }

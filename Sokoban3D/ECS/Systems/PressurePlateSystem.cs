@@ -55,11 +55,9 @@ public static class PressurePlateSystem
         });
 
         // Abre os blocos (some): libera o grid e tira o Solid. Peças que repousavam em cima
-        // viram candidatas a cair.
-        var fallers = new List<Entity>();
+        // caem no Settle do fim.
         foreach (var (e, p) in toOpen)
         {
-            CollectStackAbove(session, p, fallers);
             session.Grid.Vacate(p.X, p.Y, p.Z);
             session.World.Remove<Solid>(e);
         }
@@ -80,8 +78,9 @@ public static class PressurePlateSystem
             session.Grid.Place(p.X, p.Y, p.Z, e);
         }
 
-        if (fallers.Count > 0)
-            Gravity.Apply(session, fallers);
+        // Algum bloco sumiu: o que repousava sobre ele perdeu o apoio, re-assenta o mundo.
+        if (toOpen.Count > 0)
+            Gravity.Settle(session);
     }
 
     /// <summary>
@@ -131,17 +130,5 @@ public static class PressurePlateSystem
                 counts[plate.Group] = counts.GetValueOrDefault(plate.Group) + 1;
         });
         return counts;
-    }
-
-    /// <summary>Pilha contígua de peças que repousa diretamente sobre a célula do bloco aberto.</summary>
-    private static void CollectStackAbove(GameWorld session, GridPosition below, List<Entity> into)
-    {
-        int ny = below.Y + 1;
-        while (session.Grid.Occupant(below.X, ny, below.Z) is { } e)
-        {
-            if (!into.Contains(e))
-                into.Add(e);
-            ny++;
-        }
     }
 }

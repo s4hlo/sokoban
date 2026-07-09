@@ -86,8 +86,9 @@ public class MovementSystem
 
         _world.Move(player, playerTo.Value);
 
-        // Gravidade: toda peça que se moveu (player + caixas empurradas) cai até pousar.
-        Gravity.Apply(_world, MovedSince(before));
+        // Gravidade: tudo que ficou sem apoio cai até pousar — peças empurradas e também as
+        // pilhas que perderam o apoio (ex.: caixa em cima do player quando ele sai de baixo).
+        Gravity.Settle(_world);
 
         // Placas de pressão: a ocupação mudou, re-deriva os blocos toggle (e a queda do que
         // repousava sobre um que sumiu). Pode congelar o player (bloco aparecendo nele).
@@ -148,21 +149,6 @@ public class MovementSystem
             };
             _history.Record(e, new Move(p.X - snap.Pos.X, p.Y - snap.Pos.Y, p.Z - snap.Pos.Z, change));
         }
-    }
-
-    /// <summary>Peças que ocupam o grid e mudaram de posição desde o snapshot (candidatas a cair).</summary>
-    private List<Entity> MovedSince(Dictionary<Entity, (GridPosition Pos, bool Solid)> before)
-    {
-        var movers = new List<Entity>();
-        foreach (var (e, snap) in before)
-        {
-            if (!_world.World.Has<Solid>(e))
-                continue;
-            var p = _world.World.Get<GridPosition>(e);
-            if (p.X != snap.Pos.X || p.Y != snap.Pos.Y || p.Z != snap.Pos.Z)
-                movers.Add(e);
-        }
-        return movers;
     }
 
     /// <summary>
