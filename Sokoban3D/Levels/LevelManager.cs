@@ -306,7 +306,8 @@ public class LevelManager
                 return;
 
             var change = session.World.Has<Solid>(e) ? SolidChange.None : SolidChange.Gained;
-            history.Record(e, new Move(spawn.X - pos.X, spawn.Y - pos.Y, spawn.Z - pos.Z, change));
+            Facing? face = session.World.Has<Facing>(e) ? session.World.Get<Facing>(e) : null;
+            history.Record(e, new Move(spawn.X - pos.X, spawn.Y - pos.Y, spawn.Z - pos.Z, change, face));
         });
 
         // 2) Reposiciona cada peça pro spawn e reconstrói o grid do zero. O player deixa
@@ -338,8 +339,8 @@ public class LevelManager
         foreach (var e in toResolidify)
             session.World.Add(e, new Solid());
 
-        // O olhar do player volta ao default do spawn. A rotação não entra no histórico,
-        // então o reverso (Z) do restart não a desfaz — só as posições.
+        // O olhar do player volta ao default do spawn. O olhar pré-restart foi gravado no
+        // turno acima, então o reverso (Z) do restart também o restaura.
         var players = new QueryDescription().WithAll<Player, Facing>();
         session.World.Query(in players, (ref Facing f) => f = Facing.Default);
 

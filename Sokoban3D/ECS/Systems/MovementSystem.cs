@@ -81,14 +81,17 @@ public class MovementSystem
         }
 
         // Livre: o olhar acompanha o comando (mesmo que o passo esbarre e não saia do lugar)
-        // e o passo é direto em qualquer direção.
+        // e o passo é direto em qualquer direção. O snapshot vem ANTES do olhar mudar, pra o
+        // turno gravar o facing anterior — é ele que o undo restaura.
+        var before = Snapshot();
         if (!(dx == facing.Dx && dz == facing.Dz))
             _world.World.Set(player.Value, new Facing { Dx = dx, Dz = dz });
 
-        TryMovePlayer(player.Value, pos, dx, dz);
+        TryMovePlayer(player.Value, pos, dx, dz, before);
     }
 
-    private void TryMovePlayer(Entity player, GridPosition pos, int dx, int dz)
+    private void TryMovePlayer(Entity player, GridPosition pos, int dx, int dz,
+        Dictionary<Entity, (GridPosition Pos, bool Solid, Facing? Face)> before)
     {
         int targetX = pos.X + dx;
         int targetZ = pos.Z + dz;
@@ -99,10 +102,6 @@ public class MovementSystem
         // Sticky logo atrás do passo: o grude segura o player (não dá pra se afastar dele).
         if (Stickiness.Holds(_world, player, dx, dz))
             return;
-
-        // Estado de cada peça ANTES de mutar o mundo. Se o player de fato se mover, o CommitTurn
-        // grava o deslocamento líquido de cada uma (final menos isto).
-        var before = Snapshot();
 
         // Peças que mudaram de célula via portal neste turno: o render delas precisa aparecer
         // direto no destino, sem deslizar pelo mapa. Preenchido no PushInto e no passo do player.
@@ -274,7 +273,7 @@ public class MovementSystem
     /// re-deriva as placas, dispara animações de teleporte, grava o turno e aplica os efeitos
     /// de célula (placa atemporal, chão-morte).
     /// </summary>
-    private void SettleAndCommit(Entity player, Dictionary<Entity, (GridPosition Pos, bool Solid)> before)
+    private void SettleAndCommit(Entity player, Dictionary<Entity, (GridPosition Pos, bool Solid, Facing? Face)> before)
     {
         // Gravidade: tudo que ficou sem apoio cai até pousar — peças empurradas e também as
         // pilhas que perderam o apoio (ex.: caixa em cima do player quando ele sai de baixo).
@@ -305,27 +304,28 @@ public class MovementSystem
     }
 
     /// <summary>
-    /// Posição + solidez de cada peça reversível (player, caixas, inimigos) no início do turno.
-    /// A caixa verde é excluída: nunca empilha (só o R a reverte).
+    /// Posição + solidez + olhar de cada peça reversível (player, caixas, inimigos) no início do
+    /// turno. A caixa verde é excluída: nunca empilha (só o R a reverte).
     /// </summary>
-    private Dictionary<Entity, (GridPosition Pos, bool Solid)> Snapshot()
+    private Dictionary<Entity, (GridPosition Pos, bool Solid, Facing? Face)> Snapshot()
     {
-        var snap = new Dictionary<Entity, (GridPosition, bool)>();
+        var snap = new Dictionary<Entity, (GridPosition, bool, Facing?)>();
         var query = new QueryDescription().WithAll<GridPosition, SpawnPosition>();
         _world.World.Query(in query, (Entity e, ref GridPosition p) =>
         {
             if (_world.World.Has<Box>(e) && _world.World.Get<Box>(e).Type == BoxType.Permanent)
                 return;
-            snap[e] = (p, _world.World.Has<Solid>(e));
+            Facing? face = _world.World.Has<Facing>(e) ? _world.World.Get<Facing>(e) : null;
+            snap[e] = (p, _world.World.Has<Solid>(e), face);
         });
         return snap;
     }
 
     /// <summary>
-    /// Grava o deslocamento líquido + mudança de solidez de cada peça neste turno. Quem ficou parado
-    /// grava inércia (delta zero), mantendo as pilhas alinhadas por turno.
+    /// Grava o deslocamento líquido + mudança de solidez + olhar inicial de cada peça neste turno.
+    /// Quem ficou parado grava inércia (delta zero), mantendo as pilhas alinhadas por turno.
     /// </summary>
-    private void CommitTurn(Dictionary<Entity, (GridPosition Pos, bool Solid)> before)
+    private void CommitTurn(Dictionary<Entity, (GridPosition Pos, bool Solid, Facing? Face)> before)
     {
         foreach (var (e, snap) in before)
         {
@@ -337,7 +337,7 @@ public class MovementSystem
                 (false, true) => SolidChange.Gained,
                 _ => SolidChange.None,
             };
-            _history.Record(e, new Move(p.X - snap.Pos.X, p.Y - snap.Pos.Y, p.Z - snap.Pos.Z, change));
+            _history.Record(e, new Move(p.X - snap.Pos.X, p.Y - snap.Pos.Y, p.Z - snap.Pos.Z, change, snap.Face));
         }
     }
 

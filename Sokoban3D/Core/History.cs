@@ -17,9 +17,11 @@ public enum SolidChange : byte
 }
 
 /// <summary>
-/// O que uma peça fez num turno: deslocamento líquido <c>(Dx,Dy,Dz)</c> (movimento + queda) e a
-/// mudança de solidez. Tudo zero é inércia — ficou parada, mas grava mesmo assim pra manter as
-/// pilhas de todas as peças alinhadas por turno. O reverso anda por <c>-(delta)</c> e inverte a solidez.
+/// O que uma peça fez num turno: deslocamento líquido <c>(Dx,Dy,Dz)</c> (movimento + queda), a
+/// mudança de solidez e o olhar do INÍCIO do turno (<see cref="Face"/>, null pra peça sem
+/// <see cref="Facing"/>). Tudo zero é inércia — ficou parada, mas grava mesmo assim pra manter as
+/// pilhas de todas as peças alinhadas por turno. O reverso anda por <c>-(delta)</c>, inverte a
+/// solidez e restaura o olhar.
 /// </summary>
 public readonly struct Move
 {
@@ -27,13 +29,15 @@ public readonly struct Move
     public readonly int Dy;
     public readonly int Dz;
     public readonly SolidChange Solid;
+    public readonly Facing? Face;
 
-    public Move(int dx, int dy, int dz, SolidChange solid = SolidChange.None)
+    public Move(int dx, int dy, int dz, SolidChange solid = SolidChange.None, Facing? face = null)
     {
         Dx = dx;
         Dy = dy;
         Dz = dz;
         Solid = solid;
+        Face = face;
     }
 }
 
@@ -119,6 +123,11 @@ public class History
         // Inverte a solidez que o turno mexeu (frágil que quebrou / restart que re-solidificou).
         if (m.Solid == SolidChange.Lost) world.World.Add(entity, new Solid());
         if (m.Solid == SolidChange.Gained) world.World.Remove<Solid>(entity);
+
+        // Restaura o olhar do início do turno (gravado só pra quem tem Facing). A posição pode
+        // esbarrar e ficar (abaixo), mas o olhar volta sempre — rotação não colide com nada.
+        if (m.Face is { } face)
+            world.World.Set(entity, face);
 
         // Não ocupa o grid: só a posição lógica.
         if (!world.World.Has<Solid>(entity))
