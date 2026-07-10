@@ -176,6 +176,66 @@ public struct Obstacle
 }
 
 /// <summary>
+/// Tipos de trilho: quais direções de SAÍDA a célula permite, no plano X/Z. Retos permitem as
+/// duas pontas do eixo; curvas ligam uma ponta X com uma ponta Z. As direções de cada tipo
+/// moram em <see cref="RailRules"/>.
+/// </summary>
+public enum RailType
+{
+    StraightX,    // reto no X: sai só em ±X
+    StraightZ,    // reto no Z: sai só em ±Z
+    BendPosXPosZ, // curva: sai em +X ou +Z
+    BendPosXNegZ, // curva: sai em +X ou -Z
+    BendNegXPosZ, // curva: sai em -X ou +Z
+    BendNegXNegZ, // curva: sai em -X ou -Z
+}
+
+/// <summary>
+/// Trilho: marcador de célula (não ocupa o grid) que limita as direções de SAÍDA da caixa em
+/// cima dele. A entrada é livre por qualquer direção; sair, só pelas saídas do <see cref="Type"/>.
+/// Só vale pro movimento de jogo (empurrão, corpo magnético) — o undo/restart reposiciona
+/// direto pelo History e ignora o trilho, e a queda é vertical. Ver <see cref="Core.Rails"/>.
+/// </summary>
+public struct Rail
+{
+    public RailType Type;
+}
+
+/// <summary>
+/// Direções de saída de cada tipo de trilho. Fonte única pra regra de movimento
+/// (<see cref="Core.Rails"/>) e pro desenho (um braço por saída) nunca divergirem.
+/// </summary>
+public static class RailRules
+{
+    private static readonly (int Dx, int Dz)[] StraightXExits = { (1, 0), (-1, 0) };
+    private static readonly (int Dx, int Dz)[] StraightZExits = { (0, 1), (0, -1) };
+    private static readonly (int Dx, int Dz)[] PosXPosZExits = { (1, 0), (0, 1) };
+    private static readonly (int Dx, int Dz)[] PosXNegZExits = { (1, 0), (0, -1) };
+    private static readonly (int Dx, int Dz)[] NegXPosZExits = { (-1, 0), (0, 1) };
+    private static readonly (int Dx, int Dz)[] NegXNegZExits = { (-1, 0), (0, -1) };
+
+    /// <summary>As direções de saída permitidas pelo tipo (passos cardinais no plano X/Z).</summary>
+    public static (int Dx, int Dz)[] Exits(RailType type) => type switch
+    {
+        RailType.StraightX => StraightXExits,
+        RailType.StraightZ => StraightZExits,
+        RailType.BendPosXPosZ => PosXPosZExits,
+        RailType.BendPosXNegZ => PosXNegZExits,
+        RailType.BendNegXPosZ => NegXPosZExits,
+        _ => NegXNegZExits,
+    };
+
+    /// <summary>True se o tipo permite sair da célula na direção (dx,dz).</summary>
+    public static bool Allows(RailType type, int dx, int dz)
+    {
+        foreach (var (ex, ez) in Exits(type))
+            if (ex == dx && ez == dz)
+                return true;
+        return false;
+    }
+}
+
+/// <summary>
 /// Placa de pressão: aciona enquanto houver uma peça que ocupa o grid (player ou caixa) em
 /// cima dela. NÃO ocupa o grid (a peça precisa poder pisar). Liga-se aos blocos
 /// <see cref="Toggle"/> de mesmo <see cref="Group"/>: pressionada, ela inverte o estado deles.

@@ -28,6 +28,7 @@ public static class LevelSerializer
             new ToggleCellConverter(),
             new PortalBoxCellConverter(),
             new BigBoxCellConverter(),
+            new RailCellConverter(),
         },
     };
 
@@ -54,6 +55,7 @@ public static class LevelSerializer
         AppendArray(sb, "Plates", FormatPlates(l.PlateSpawns), last: false);
         AppendArray(sb, "Toggles", FormatToggles(l.ToggleSpawns), last: false);
         AppendArray(sb, "Bases", Format(l.TimelessBaseSpawns), last: false);
+        AppendArray(sb, "Rails", FormatRails(l.RailSpawns), last: false);
         AppendArray(sb, "PortalBoxes", FormatPortalBoxes(l.PortalBoxSpawns), last: false);
         AppendArray(sb, "BigBoxes", FormatBigBoxes(l.BigBoxSpawns), last: true);
 
@@ -108,6 +110,14 @@ public static class LevelSerializer
         var list = new List<string>(cells.Count);
         foreach (var (x, y, z, axis) in cells)
             list.Add($"[{x}, {y}, {z}, \"{axis}\"]");
+        return list;
+    }
+
+    private static List<string> FormatRails(List<(int X, int Y, int Z, RailType Type)> cells)
+    {
+        var list = new List<string>(cells.Count);
+        foreach (var (x, y, z, t) in cells)
+            list.Add($"[{x}, {y}, {z}, \"{t}\"]");
         return list;
     }
 
@@ -173,6 +183,7 @@ public static class LevelSerializer
         foreach (var p in dto.Plates) level.PlateSpawns.Add((p.X, p.Y, p.Z, p.Group));
         foreach (var t in dto.Toggles) level.ToggleSpawns.Add((t.X, t.Y, t.Z, t.Group, t.SolidByDefault, t.Threshold <= 0 ? 1 : t.Threshold));
         foreach (var c in dto.Bases) level.TimelessBaseSpawns.Add((c.X, c.Y, c.Z));
+        foreach (var r in dto.Rails) level.RailSpawns.Add((r.X, r.Y, r.Z, r.Type));
         foreach (var p in dto.PortalBoxes) level.PortalBoxSpawns.Add((p.X, p.Y, p.Z, p.Group));
         foreach (var b in dto.BigBoxes) level.BigBoxSpawns.Add((b.X, b.Y, b.Z, b.Axis));
 
@@ -195,6 +206,7 @@ public static class LevelSerializer
         public List<PlateCell> Plates { get; set; } = new();
         public List<ToggleCell> Toggles { get; set; } = new();
         public List<Cell> Bases { get; set; } = new();
+        public List<RailCell> Rails { get; set; } = new();
         public List<PortalBoxCell> PortalBoxes { get; set; } = new();
         public List<BigBoxCell> BigBoxes { get; set; } = new();
     }
@@ -207,6 +219,7 @@ public static class LevelSerializer
     private record struct ToggleCell(int X, int Y, int Z, int Group, bool SolidByDefault, int Threshold);
     private record struct PortalBoxCell(int X, int Y, int Z, int Group);
     private record struct BigBoxCell(int X, int Y, int Z, BigBoxAxis Axis);
+    private record struct RailCell(int X, int Y, int Z, RailType Type);
 
     private static void ExpectArray(ref Utf8JsonReader reader)
     {
@@ -287,6 +300,23 @@ public static class LevelSerializer
 
         public override void Write(Utf8JsonWriter writer, BigBoxCell v, JsonSerializerOptions options)
             => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, \"{v.Axis}\"]");
+    }
+
+    private sealed class RailCellConverter : JsonConverter<RailCell>
+    {
+        public override RailCell Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            ExpectArray(ref reader);
+            reader.Read(); int x = reader.GetInt32();
+            reader.Read(); int y = reader.GetInt32();
+            reader.Read(); int z = reader.GetInt32();
+            reader.Read(); var t = Enum.Parse<RailType>(reader.GetString()!, ignoreCase: true);
+            reader.Read(); // EndArray
+            return new RailCell(x, y, z, t);
+        }
+
+        public override void Write(Utf8JsonWriter writer, RailCell v, JsonSerializerOptions options)
+            => writer.WriteRawValue($"[{v.X}, {v.Y}, {v.Z}, \"{v.Type}\"]");
     }
 
     private sealed class PortalCellConverter : JsonConverter<PortalCell>

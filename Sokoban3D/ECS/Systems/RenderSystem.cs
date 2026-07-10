@@ -35,6 +35,9 @@ public class RenderSystem
     private static readonly Color PlatePressedColor = new(210, 170, 255);
     // Base atemporal (tile plano verde): congela o undo de quem está em cima.
     private static readonly Color TimelessBaseColor = new(60, 200, 120);
+    // Trilho: base escura de dormentes + braços de aço claros nas direções de saída permitidas.
+    private static readonly Color RailBaseColor = new(70, 58, 48);
+    private static readonly Color RailArmColor = new(205, 210, 220);
     // Bloco toggle: cubo roxo quando sólido; tile fino (pegada) quando aberto, pra anteceder
     // onde ele vai aparecer.
     private static readonly Color ToggleSolidColor = new(130, 80, 190);
@@ -128,6 +131,21 @@ public class RenderSystem
             var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
             var color = grid.Occupant(p.X, p.Y, p.Z) is not null ? PlatePressedColor : PlateColor;
             _cubes.Draw(pos, tileScale, color, view, projection);
+        });
+
+        // Trilhos: a base + um braço por direção de saída permitida — a forma desenha a regra
+        // (reto vira uma linha, curva vira um L).
+        var rails = new QueryDescription().WithAll<Rail, GridPosition>();
+        _world.World.Query(in rails, (ref Rail r, ref GridPosition p) =>
+        {
+            var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
+            _cubes.Draw(pos, tileScale, RailBaseColor, view, projection);
+            foreach (var (dx, dz) in RailRules.Exits(r.Type))
+            {
+                var arm = pos + new Vector3(dx * 0.25f, 0.05f, dz * 0.25f);
+                var armScale = dx != 0 ? new Vector3(0.5f, 0.08f, 0.18f) : new Vector3(0.18f, 0.08f, 0.5f);
+                _cubes.Draw(arm, armScale, RailArmColor, view, projection);
+            }
         });
 
         // Bases atemporais: tile verde fixo (congela o undo de quem pisa em cima).

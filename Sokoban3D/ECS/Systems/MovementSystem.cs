@@ -137,12 +137,13 @@ public class MovementSystem
     /// </summary>
     private void TryMoveBody(Entity player, GridPosition pos, List<(Entity Box, int Ox, int Oz)> magnets, int dx, int dz)
     {
-        // Qualquer peça do corpo grudada num sticky atrás do passo trava a translação inteira
-        // (o corpo é rígido). Checado antes de qualquer mutação: jogada impossível, sem turno.
+        // Qualquer peça do corpo grudada num sticky atrás do passo — ou caixa sobre um trilho
+        // que não sai nessa direção — trava a translação inteira (o corpo é rígido). Checado
+        // antes de qualquer mutação: jogada impossível, sem turno.
         if (Stickiness.Holds(_world, player, dx, dz))
             return;
         foreach (var (box, _, _) in magnets)
-            if (Stickiness.Holds(_world, box, dx, dz))
+            if (Stickiness.Holds(_world, box, dx, dz) || Rails.Holds(_world, box, dx, dz))
                 return;
 
         var before = Snapshot();
@@ -207,11 +208,14 @@ public class MovementSystem
 
         // Giro grudado: o deslocamento líquido de cada caixa varrida (a diagonal do arco) se
         // decompõe nas direções (nx,nz) e (-ox,-oz); um sticky segurando a caixa contra
-        // qualquer uma delas trava o giro inteiro, antes de qualquer mutação.
+        // qualquer uma delas trava o giro inteiro, antes de qualquer mutação. Trilho sob a
+        // caixa: a varredura sai da célula na tangente (nx,nz) — se o trilho não permite essa
+        // direção, o giro também trava.
         foreach (var (box, ox, oz) in magnets)
         {
             var (nx, nz) = Rot(ox, oz);
-            if (Stickiness.Holds(_world, box, nx, nz) || Stickiness.Holds(_world, box, -ox, -oz))
+            if (Stickiness.Holds(_world, box, nx, nz) || Stickiness.Holds(_world, box, -ox, -oz)
+                || Rails.Holds(_world, box, nx, nz))
                 return;
         }
 
@@ -402,6 +406,11 @@ public class MovementSystem
         // Caixa com um sticky logo atrás não se afasta dele: o empurrão trava. Nem a frágil
         // quebra — ela está presa pelo grude, não prensada contra algo à frente.
         if (Stickiness.Holds(_world, occ, dx, dz))
+            return null;
+
+        // Caixa sobre um trilho só sai dele nas direções permitidas: empurrão fora delas trava.
+        // Como no sticky, a frágil não quebra — está presa pelo trilho, não prensada.
+        if (Rails.Holds(_world, occ, dx, dz))
             return null;
 
         // BigBox: duas células como uma unidade só — regra própria, não passa pelo peso genérico.

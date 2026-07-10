@@ -29,6 +29,7 @@ public class EditorRenderer
     private static readonly Color TimelessBaseColor = new(60, 200, 120);
     private static readonly Color PortalBoxColor = new(200, 70, 200);
     private static readonly Color BigBoxColor = new(210, 180, 140);
+    private static readonly Color RailColor = new(205, 210, 220);
     private static readonly Color EraserColor = new(230, 90, 90);
 
     // Cores do HUD por papel: fundo translúcido dos painéis, cabeçalho em destaque, texto
@@ -78,6 +79,7 @@ public class EditorRenderer
         (new PaletteItem(EditorBrush.TimelessBase), "8", "Base atemporal"),
         (new PaletteItem(EditorBrush.PortalBox), "9", "Caixa portal"),
         (new PaletteItem(EditorBrush.BigBox), "B", "Caixa grande"),
+        (new PaletteItem(EditorBrush.Rail), "T", "Trilho"),
         (new PaletteItem(EditorBrush.Eraser), "0", "Borracha"),
     };
 
@@ -389,6 +391,7 @@ public class EditorRenderer
         EditorBrush.TimelessBase => "Base atemporal (apaga o historico de quem pisa)",
         EditorBrush.PortalBox => $"Caixa portal (grupo {editor.Group})",
         EditorBrush.BigBox => $"Caixa grande (eixo {editor.BigBoxAxis})",
+        EditorBrush.Rail => $"Trilho ({editor.RailType}: caixa em cima so sai por essas direcoes)",
         var b => b.ToString(),
     };
 
@@ -402,6 +405,7 @@ public class EditorRenderer
         EditorBrush.Toggle => "[7] inverte repouso   [ ] grupo   , . placas p/ acionar",
         EditorBrush.PortalBox => "[ ] ou Ctrl+Roda: grupo",
         EditorBrush.BigBox => "[B] inverte o eixo",
+        EditorBrush.Rail => "[T] ou [ ] cicla o tipo",
         _ => "",
     };
 
@@ -417,6 +421,7 @@ public class EditorRenderer
         EditorBrush.TimelessBase => TimelessBaseColor,
         EditorBrush.PortalBox => PortalBoxColor,
         EditorBrush.BigBox => BigBoxColor,
+        EditorBrush.Rail => RailColor,
         EditorBrush.Eraser => EraserColor,
         _ => CursorColor,
     };

@@ -24,5 +24,6 @@ public enum EditorBrush
     TimelessBase,
     PortalBox,
     BigBox,
+    Rail,
     Eraser,
 }

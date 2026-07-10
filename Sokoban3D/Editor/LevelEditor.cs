@@ -67,6 +67,8 @@ public class LevelEditor
     public ObstacleType ObstacleType { get; private set; } = ObstacleType.Normal;
     // Eixo da próxima caixa grande a ser colocada (ou da que já está sob o cursor, ao reselecionar).
     public BigBoxAxis BigBoxAxis { get; private set; } = BigBoxAxis.X;
+    // Tipo do próximo trilho a ser colocado (reselecionar a brush Trilho cicla; [ ] também).
+    public RailType RailType { get; private set; } = RailType.StraightX;
     public int PortalTarget { get; private set; } = 1;
     // Grupo que liga placas aos blocos toggle, e o estado de repouso do bloco que será colocado.
     public int Group { get; private set; } = 0;
@@ -381,6 +383,7 @@ public class LevelEditor
         EditorBrush.Plate => _working.PlateSpawns.Any(p => p.X == x && p.Y == y && p.Z == z),
         EditorBrush.Toggle => _working.ToggleSpawns.Any(t => t.X == x && t.Y == y && t.Z == z),
         EditorBrush.TimelessBase => _working.TimelessBaseSpawns.Contains((x, y, z)),
+        EditorBrush.Rail => _working.RailSpawns.Any(r => r.X == x && r.Y == y && r.Z == z),
         EditorBrush.PortalBox => _working.PortalBoxSpawns.Any(p => p.X == x && p.Y == y && p.Z == z),
         EditorBrush.BigBox => _working.BigBoxSpawns.Any(b => BigBoxOccupies(b, x, y, z)),
         _ => false,
@@ -453,6 +456,7 @@ public class LevelEditor
         Take(_working.EnemySpawns, c.EnemySpawns, s => s == (x, y, z));
         Take(_working.ObjectiveSpawns, c.ObjectiveSpawns, s => s == (x, y, z));
         Take(_working.TimelessBaseSpawns, c.TimelessBaseSpawns, s => s == (x, y, z));
+        Take(_working.RailSpawns, c.RailSpawns, r => r.X == x && r.Y == y && r.Z == z);
         Take(_working.BoxSpawns, c.BoxSpawns, b => b.X == x && b.Y == y && b.Z == z);
         Take(_working.PortalSpawns, c.PortalSpawns, p => p.X == x && p.Y == y && p.Z == z);
         Take(_working.PlateSpawns, c.PlateSpawns, p => p.X == x && p.Y == y && p.Z == z);
@@ -497,6 +501,7 @@ public class LevelEditor
         foreach (var s in content.EnemySpawns) _working.EnemySpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
         foreach (var s in content.ObjectiveSpawns) _working.ObjectiveSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
         foreach (var s in content.TimelessBaseSpawns) _working.TimelessBaseSpawns.Add((s.X + dx, s.Y + dy, s.Z + dz));
+        foreach (var r in content.RailSpawns) _working.RailSpawns.Add((r.X + dx, r.Y + dy, r.Z + dz, r.Type));
         foreach (var b in content.BoxSpawns) _working.BoxSpawns.Add((b.X + dx, b.Y + dy, b.Z + dz, b.Type));
         foreach (var p in content.PortalSpawns) _working.PortalSpawns.Add((p.X + dx, p.Y + dy, p.Z + dz, p.LevelIndex, p.Completed));
         foreach (var p in content.PlateSpawns) _working.PlateSpawns.Add((p.X + dx, p.Y + dy, p.Z + dz, p.Group));
@@ -555,6 +560,11 @@ public class LevelEditor
             Brush = EditorBrush.Objective;
         else if (_working.TimelessBaseSpawns.Contains((x, y, z)))
             Brush = EditorBrush.TimelessBase;
+        else if ((i = _working.RailSpawns.FindIndex(r => r.X == x && r.Y == y && r.Z == z)) >= 0)
+        {
+            Brush = EditorBrush.Rail;
+            RailType = _working.RailSpawns[i].Type;
+        }
         else if ((i = _working.ObstacleSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z)) >= 0)
         {
             Brush = EditorBrush.Obstacle;
@@ -576,6 +586,7 @@ public class LevelEditor
         || _working.EnemySpawns.Contains((x, y, z))
         || _working.ObjectiveSpawns.Contains((x, y, z))
         || _working.TimelessBaseSpawns.Contains((x, y, z))
+        || _working.RailSpawns.Any(r => r.X == x && r.Y == y && r.Z == z)
         || _working.BoxSpawns.Any(b => b.X == x && b.Y == y && b.Z == z)
         || _working.PortalSpawns.Any(p => p.X == x && p.Y == y && p.Z == z)
         || _working.PlateSpawns.Any(p => p.X == x && p.Y == y && p.Z == z)
@@ -618,6 +629,7 @@ public class LevelEditor
         if (Pressed(k, Keys.D8)) SelectBrush(EditorBrush.TimelessBase);
         if (Pressed(k, Keys.D9)) SelectBrush(EditorBrush.PortalBox);
         if (Pressed(k, Keys.B)) SelectBrush(EditorBrush.BigBox);
+        if (Pressed(k, Keys.T)) SelectBrush(EditorBrush.Rail);
         if (Pressed(k, Keys.D0)) SelectBrush(EditorBrush.Eraser);
 
         // [ ] editam o item sob o cursor (grupo da placa/toggle, alvo do portal); sem nada
@@ -658,6 +670,8 @@ public class LevelEditor
             ToggleSolidByDefault = !ToggleSolidByDefault;
         else if (brush == EditorBrush.BigBox && Brush == EditorBrush.BigBox)
             BigBoxAxis = BigBoxAxis == BigBoxAxis.X ? BigBoxAxis.Z : BigBoxAxis.X;
+        else if (brush == EditorBrush.Rail && Brush == EditorBrush.Rail)
+            RailType = CycleRail(RailType, +1);
         Brush = brush;
     }
 
@@ -712,6 +726,19 @@ public class LevelEditor
                 else Group = Math.Max(0, Group + delta);
                 break;
 
+            case EditorBrush.Rail:
+                int ri = _working.RailSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
+                if (ri >= 0)
+                {
+                    PushUndo();
+                    var r = _working.RailSpawns[ri];
+                    r.Type = CycleRail(r.Type, delta);
+                    _working.RailSpawns[ri] = r;
+                    Rebuild();
+                }
+                else RailType = CycleRail(RailType, delta);
+                break;
+
             case EditorBrush.Toggle:
                 int ti = _working.ToggleSpawns.FindIndex(c => c.X == x && c.Y == y && c.Z == z);
                 if (ti >= 0)
@@ -757,6 +784,14 @@ public class LevelEditor
     {
         int plates = _working.PlateSpawns.Count(pl => pl.Group == group);
         return Math.Clamp(value, 1, Math.Max(1, plates));
+    }
+
+    /// <summary>Cicla o tipo de trilho na ordem do enum, pra frente ou pra trás.</summary>
+    private static RailType CycleRail(RailType type, int delta)
+    {
+        var values = Enum.GetValues<RailType>();
+        int i = ((int)type + delta) % values.Length;
+        return values[(i + values.Length) % values.Length];
     }
 
     // ----- Colocar / apagar -----
@@ -811,6 +846,10 @@ public class LevelEditor
             case EditorBrush.TimelessBase:
                 RemoveMarkersAt(x, y, z);
                 _working.TimelessBaseSpawns.Add((x, y, z));
+                break;
+            case EditorBrush.Rail:
+                RemoveMarkersAt(x, y, z);
+                _working.RailSpawns.Add((x, y, z, RailType));
                 break;
             case EditorBrush.Toggle:
                 RemoveSolidsAt(x, y, z);
@@ -875,6 +914,7 @@ public class LevelEditor
         _working.PortalSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.PlateSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
         _working.TimelessBaseSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
+        _working.RailSpawns.RemoveAll(c => c.X == x && c.Y == y && c.Z == z);
     }
 
     // ----- Redimensionar -----
@@ -927,6 +967,7 @@ public class LevelEditor
         _working.PlateSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.ToggleSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.TimelessBaseSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
+        _working.RailSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.PortalBoxSpawns.RemoveAll(c => Out(c.X, c.Y, c.Z));
         _working.BigBoxSpawns.RemoveAll(c =>
         {

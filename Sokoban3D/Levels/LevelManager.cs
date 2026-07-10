@@ -64,6 +64,10 @@ public class Level
     // Bases atemporais: marcadores que não ocupam o grid e congelam o undo de quem está em cima.
     public List<(int X, int Y, int Z)> TimelessBaseSpawns = new();
 
+    // Trilhos: marcadores que não ocupam o grid e limitam as direções de SAÍDA da caixa em cima
+    // (a entrada é livre; o undo ignora). O tipo define as saídas (ver RailRules).
+    public List<(int X, int Y, int Z, RailType Type)> RailSpawns = new();
+
     // Caixas portal: pares ligados por Group. Quem tenta entrar numa é teleportado pro lado
     // oposto da parceira. Ocupam o grid como caixa comum (caem, têm undo).
     public List<(int X, int Y, int Z, int Group)> PortalBoxSpawns = new();
@@ -94,6 +98,7 @@ public class Level
             PlateSpawns = new(PlateSpawns),
             ToggleSpawns = new(ToggleSpawns),
             TimelessBaseSpawns = new(TimelessBaseSpawns),
+            RailSpawns = new(RailSpawns),
             PortalBoxSpawns = new(PortalBoxSpawns),
             BigBoxSpawns = new(BigBoxSpawns),
         };
@@ -245,6 +250,17 @@ public class LevelManager
             session.World.Create(
                 new GridPosition(x, y, z),
                 new TimelessBase(),
+                new CellMarker()
+            );
+        }
+
+        // Spawn trilhos. Marcador (não ocupa o grid): a caixa em cima só sai nas direções do
+        // tipo (ver Core.Rails); a entrada é livre e o undo ignora.
+        foreach (var (x, y, z, type) in level.RailSpawns)
+        {
+            session.World.Create(
+                new GridPosition(x, y, z),
+                new Rail { Type = type },
                 new CellMarker()
             );
         }
