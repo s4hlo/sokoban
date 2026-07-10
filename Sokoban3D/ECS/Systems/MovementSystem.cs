@@ -592,14 +592,15 @@ public class MovementSystem
     }
 
     /// <summary>
-    /// Direção a partir das teclas WASD recém-pressionadas (uma só por frame), no plano X/Z.
+    /// Direção a partir das teclas recém-pressionadas (uma só por frame), no plano X/Z.
+    /// Três layouts equivalentes: WASD, setas e HJKL (vim).
     /// </summary>
     private (int dx, int dz) GetFreshDirection(KeyboardState k)
     {
-        if (Pressed(k, Keys.A)) return (-1, 0);
-        if (Pressed(k, Keys.D)) return (1, 0);
-        if (Pressed(k, Keys.W)) return (0, -1);
-        if (Pressed(k, Keys.S)) return (0, 1);
+        if (Pressed(k, Keys.A) || Pressed(k, Keys.Left) || Pressed(k, Keys.H)) return (-1, 0);
+        if (Pressed(k, Keys.D) || Pressed(k, Keys.Right) || Pressed(k, Keys.L)) return (1, 0);
+        if (Pressed(k, Keys.W) || Pressed(k, Keys.Up) || Pressed(k, Keys.K)) return (0, -1);
+        if (Pressed(k, Keys.S) || Pressed(k, Keys.Down) || Pressed(k, Keys.J)) return (0, 1);
         return (0, 0);
     }
 
