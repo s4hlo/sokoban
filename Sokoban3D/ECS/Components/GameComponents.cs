@@ -36,7 +36,7 @@ public enum BoxType
     Light,   // leve: sem peso, carregada de graça (até por outra caixa)
     Medium,  // média: o player empurra até duas em fila
     Heavy,   // pesada: só uma por vez
-    Fragile, // frágil: empurra como leve, mas quebra se for contra algo que não move
+    Fragile, // frágil: empurra como leve, mas quebra prensada contra algo que não move — e quando a peça que repousava em cima dela sai (ver Core.Fragility)
     Permanent, // verde: empurra como leve, mas o reverso não a desfaz (só o R volta ela)
     Portal,  // teleporta quem tenta entrar nela pro lado oposto do portal parceiro (mesmo Group)
     Magnetic, // gruda no player que encostar (ver Core.Magnetism): vira parte do corpo dele

@@ -40,6 +40,10 @@ public class MovementSystem
     // em algo — se sim, ainda é um turno de verdade (gravidade + histórico).
     private bool _pushMutated;
 
+    // Frágeis armadas no início do turno atual (peça repousando em cima de cada uma), capturadas
+    // junto do Snapshot e conferidas no SettleAndCommit (ver Core.Fragility).
+    private List<(Entity Box, Entity Loader)> _fragileLoads = new();
+
     public void Update(GameWorld session, KeyboardState keyboard)
     {
         _world = session;
@@ -283,6 +287,11 @@ public class MovementSystem
         // repousava sobre um que sumiu). Pode congelar o player (bloco aparecendo nele).
         PressurePlateSystem.Resolve(_world);
 
+        // Frágeis armadas que perderam a carga (quem estava em cima saiu): quebram agora, antes
+        // do commit, pra perda de Solid e quedas entrarem no histórico deste turno.
+        if (Fragility.ResolveDepartures(_world, _fragileLoads))
+            PressurePlateSystem.Resolve(_world);
+
         // Quem teleportou ganha a animação de portal (entra/sai), montada agora que a célula final
         // já está assentada pela gravidade. O resto continua interpolando normalmente.
         StartTeleportAnims();
@@ -305,10 +314,14 @@ public class MovementSystem
 
     /// <summary>
     /// Posição + solidez + olhar de cada peça reversível (player, caixas, inimigos) no início do
-    /// turno. A caixa verde é excluída: nunca empilha (só o R a reverte).
+    /// turno. A caixa verde é excluída: nunca empilha (só o R a reverte). Também captura, de
+    /// carona, as frágeis armadas do turno (é o único ponto que roda exatamente uma vez por
+    /// turno, antes de qualquer mutação).
     /// </summary>
     private Dictionary<Entity, (GridPosition Pos, bool Solid, Facing? Face)> Snapshot()
     {
+        _fragileLoads = Fragility.CaptureLoads(_world);
+
         var snap = new Dictionary<Entity, (GridPosition, bool, Facing?)>();
         var query = new QueryDescription().WithAll<GridPosition, SpawnPosition>();
         _world.World.Query(in query, (Entity e, ref GridPosition p) =>
