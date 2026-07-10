@@ -8,6 +8,7 @@ using Sokoban3D.ECS.Components;
 using Sokoban3D.ECS.Systems;
 using Sokoban3D.Editor;
 using Sokoban3D.Levels;
+using Sokoban3D.Solver;
 using Serilog;
 
 namespace Sokoban3D;
@@ -31,6 +32,12 @@ public class Game1 : Game
     private SpriteFont _hudFont;
     private SpriteBatch _hudBatch;
     private bool _editorActive;
+
+    // Solver-playback (dev tool): alterna com P. Enquanto ativo, o input do player fica
+    // pausado e o tool injeta a solução no mesmo Step/Undo do jogo, uma ação por batida.
+    private SolverTool _solver;
+    private SolverRenderer _solverRenderer;
+    private bool _solverActive;
 
     // Sessão ativa: o navigator é dono da pilha/cache de níveis; aqui só se referencia o topo.
     private GameWorld Active => _navigator.Active;
@@ -65,6 +72,10 @@ public class Game1 : Game
         // Redimensionar o grid no editor exige reenquadrar a câmera.
         _editor.GridChanged += ReframeCamera;
 
+        // O solver-playback reusa o MESMO MovementSystem do jogo: a solução executa pelas
+        // regras reais, sem segunda cópia pra divergir.
+        _solver = new SolverTool(_levelManager, _movementSystem);
+
         Log.Information("Game initialized");
 
         base.Initialize();
@@ -80,6 +91,7 @@ public class Game1 : Game
         _hudFont = Content.Load<SpriteFont>("Hud");
         _hudBatch = new SpriteBatch(GraphicsDevice);
         _editorRenderer = new EditorRenderer(GraphicsDevice, cubes, _hudFont);
+        _solverRenderer = new SolverRenderer(GraphicsDevice, _hudFont);
 
         // Começa na raiz da árvore de níveis (um nível como qualquer outro). O navigator
         // dispara LevelChanged, que reposiciona a câmera.
@@ -96,7 +108,8 @@ public class Game1 : Game
 
         // Tab alterna entre jogar e editar a sessão ativa. Ao entrar, o editor recebe o teclado
         // e o mouse atuais pra a detecção de borda não disparar uma brush no mesmo frame.
-        bool toggled = Pressed(keyboard, Keys.Tab);
+        // Mutuamente exclusivo com o solver (P).
+        bool toggled = !_solverActive && Pressed(keyboard, Keys.Tab);
         if (toggled)
         {
             _editorActive = !_editorActive;
@@ -122,6 +135,35 @@ public class Game1 : Game
             return;
         }
 
+        // P alterna o solver-playback (dev tool). Ao entrar, o nível reseta pro estado de
+        // receita (o solver resolve a partir do zero) e a solução executa sozinha.
+        if (Pressed(keyboard, Keys.P))
+        {
+            _solverActive = !_solverActive;
+            if (_solverActive)
+            {
+                _solver.Enter(Active);
+                // FullReset é instantâneo: encaixa o render sem deslizar, como no F.
+                _animationSystem.SnapAll(Active);
+            }
+            else
+                _solver.Exit(Active);
+        }
+
+        if (_solverActive)
+        {
+            // Playback: o tool injeta as ações no engine; o input do player fica pausado.
+            // Animação e placas seguem rodando (é um turno normal do jogo). A conclusão pela
+            // meta fica SUSPENSA — dá pra ver o estado final; sair com P e pisar de novo conclui.
+            float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+            _solver.Update(Active, dt);
+            PressurePlateSystem.Resolve(Active);
+            _animationSystem.Update(Active, dt);
+            _previousKeyboard = keyboard;
+            base.Update(gameTime);
+            return;
+        }
+
         // Reverso/restart funcionam em qualquer nível — cada sessão tem seu próprio histórico.
         if (Pressed(keyboard, Keys.F))
         {
@@ -133,15 +175,12 @@ public class Game1 : Game
             _levelManager.Restart(Active);
         else if (Pressed(keyboard, Keys.Z))
         {
-            // Move as peças na direção oposta do último turno. Tira o player do estado caído.
-            // Não snapa: deixa o RenderPosition defasado pra o MoveAnimationSystem deslizar as
-            // peças de volta, igual a um movimento normal. Quem voltou atravessando um portal ganha
-            // a animação de teleporte reconstruída do mundo (o histórico não guarda portal).
-            if (Active.History.Undo(Active))
-            {
-                Active.PlayerFell = false;
+            // Undo canônico (regras no MovementSystem.Undo). Não snapa: deixa o RenderPosition
+            // defasado pra o MoveAnimationSystem deslizar as peças de volta, igual a um movimento
+            // normal. Quem voltou atravessando um portal ganha a animação de teleporte
+            // reconstruída do mundo (o histórico não guarda portal) — parte de render, só aqui.
+            if (_movementSystem.Undo(Active))
                 _movementSystem.AnimateUndoTeleports(Active, Active.History.LastReverted);
-            }
         }
         // T = suspender: sai pro pai preservando este nível (volta exatamente onde parou).
         else if (Pressed(keyboard, Keys.T))
@@ -237,6 +276,14 @@ public class Game1 : Game
             _editorRenderer.Draw(Active, _editor, _camera.View, _camera.Projection);
         else
             DrawLevelHud();
+
+        // HUD do solver-playback por cima da cena.
+        if (_solverActive)
+            _solverRenderer.Draw(_solver);
+
+        // HUD do solver-playback por cima da cena.
+        if (_solverActive)
+            _solverRenderer.Draw(_solver);
 
         base.Draw(gameTime);
     }

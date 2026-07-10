@@ -72,6 +72,41 @@ public class History
     public void Clear() => _stacks.Clear();
 
     /// <summary>
+    /// Fotografa as pilhas: um array por peça, do FUNDO pro TOPO. Pilhas vazias são omitidas
+    /// (forma canônica: vazio ≡ ausente — importante pra comparação de estados do solver).
+    /// Usado pelo solver (tier timeless) pra incluir o histórico na chave de busca e restaurá-lo.
+    /// </summary>
+    public Dictionary<Entity, Move[]> Capture()
+    {
+        var snap = new Dictionary<Entity, Move[]>(_stacks.Count);
+        foreach (var (entity, stack) in _stacks)
+        {
+            if (stack.Count == 0)
+                continue;
+            var moves = stack.ToArray();      // Stack.ToArray devolve topo → fundo
+            System.Array.Reverse(moves);      // fundo → topo, pronto pra re-empilhar na ordem
+            snap[entity] = moves;
+        }
+        return snap;
+    }
+
+    /// <summary>
+    /// Restaura as pilhas a partir de um snapshot do <see cref="Capture"/>: descarta o estado
+    /// atual e re-empilha cada array (fundo → topo). Peças ausentes ficam com pilha vazia.
+    /// </summary>
+    public void Restore(Dictionary<Entity, Move[]> snapshot)
+    {
+        _stacks.Clear();
+        foreach (var (entity, moves) in snapshot)
+        {
+            var stack = new Stack<Move>(moves.Length);
+            foreach (var m in moves)
+                stack.Push(m);
+            _stacks[entity] = stack;
+        }
+    }
+
+    /// <summary>
     /// Esvazia a pilha de uma peça: ela fica commitada na posição atual e o reverso não a toca mais.
     /// É o efeito da placa atemporal. Como segue empilhando nos turnos seguintes, o topo continua
     /// alinhado — só o passado some.

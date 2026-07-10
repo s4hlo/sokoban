@@ -46,18 +46,33 @@ public class MovementSystem
 
     public void Update(GameWorld session, KeyboardState keyboard)
     {
+        // Wrapper fino de input: só a detecção de borda do teclado mora aqui. Toda a regra
+        // vive no Step, que também serve chamadores headless (solver, testes).
+        (int dx, int dz) = GetFreshDirection(keyboard);
+        _previous = keyboard;
+
+        if (dx == 0 && dz == 0)
+            return;
+
+        Step(session, dx, dz);
+    }
+
+    /// <summary>
+    /// Um turno completo do jogo na direção (dx,dz), sem teclado nem render: empurrão,
+    /// teleporte, gravidade, placas, histórico e efeitos de célula. É o ponto de entrada
+    /// canônico das regras — o input do jogo e o solver/testes (headless) chamam o MESMO
+    /// método, então não existe segunda cópia das regras pra divergir. O agendamento de
+    /// animação embutido (MarkTeleport/StartTeleportAnims) só escreve componentes
+    /// (TeleportAnim) — puro CPU: headless ninguém os consome e o custo é desprezível.
+    /// </summary>
+    public void Step(GameWorld session, int dx, int dz)
+    {
         _world = session;
         _history = session.History;
 
         // Player caído está congelado: ignora o movimento (só Z/R/T tiram dele desse estado).
         if (session.PlayerFell)
-        {
-            _previous = keyboard;
             return;
-        }
-
-        (int dx, int dz) = GetFreshDirection(keyboard);
-        _previous = keyboard;
 
         if (dx == 0 && dz == 0)
             return;
@@ -92,6 +107,23 @@ public class MovementSystem
             _world.World.Set(player.Value, new Facing { Dx = dx, Dz = dz });
 
         TryMovePlayer(player.Value, pos, dx, dz, before);
+    }
+
+    /// <summary>
+    /// Undo canônico (a ação do Z): move as peças na direção oposta do último turno, tira o
+    /// player do estado caído e re-deriva as placas. Como o Step, é a definição única — o jogo
+    /// e o solver/testes (headless) chamam o mesmo método; a parte de render (animação de
+    /// teleporte reconstruída) fica por conta do chamador via <see cref="AnimateUndoTeleports"/>.
+    /// Retorna false se não havia nada a desfazer.
+    /// </summary>
+    public bool Undo(GameWorld session)
+    {
+        if (!session.History.Undo(session))
+            return false;
+
+        session.PlayerFell = false;
+        PressurePlateSystem.Resolve(session);
+        return true;
     }
 
     private void TryMovePlayer(Entity player, GridPosition pos, int dx, int dz,
