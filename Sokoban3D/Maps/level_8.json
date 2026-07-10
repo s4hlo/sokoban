@@ -8,7 +8,9 @@
   "Boxes": [
     [2, 1, 3, "Light"]
   ],
-  "Objectives": [],
+  "Objectives": [
+    [5, 1, 2]
+  ],
   "Enemies": [],
   "Obstacles": [
     [0, 0, 0],
