@@ -104,6 +104,28 @@ public class LevelNavigator
     }
 
     /// <summary>
+    /// Salta direto pro nível de id <paramref name="id"/> (atalho de navegação), preservando
+    /// as sessões atuais no cache (como suspender). A pilha vira raiz → destino, então concluir
+    /// o destino volta pra raiz — o salto é um desvio, não um novo ramo da árvore.
+    /// </summary>
+    public void JumpTo(int id)
+    {
+        if (Active.LevelId == id)
+            return;
+
+        // Desempilha até a raiz sem descartar nada: as sessões continuam vivas no cache.
+        while (_stack.Count > 1)
+            _stack.Pop();
+
+        if (id == LevelCatalog.RootId)
+            RefreshPortals(Active);
+        else
+            _stack.Push(OpenLevel(id));
+
+        LevelChanged?.Invoke();
+    }
+
+    /// <summary>
     /// Abre o nível de id <paramref name="id"/>: devolve a sessão cacheada (estado preservado)
     /// ou cria uma nova a partir da receita na primeira visita. Sempre ressincroniza os portais
     /// com a conclusão global (um neto concluído noutro ramo deve aparecer verde aqui também).

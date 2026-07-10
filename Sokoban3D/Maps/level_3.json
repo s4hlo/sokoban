@@ -106,5 +106,7 @@
     [6, 1, 2, 0, true, 1],
     [7, 1, 2, 0, true, 1]
   ],
-  "Bases": []
+  "Bases": [],
+  "PortalBoxes": [],
+  "BigBoxes": []
 }

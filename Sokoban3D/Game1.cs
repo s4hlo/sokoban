@@ -1,3 +1,4 @@
+using System.Linq;
 using Arch.Core;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -28,6 +29,7 @@ public class Game1 : Game
     private LevelEditor _editor;
     private EditorRenderer _editorRenderer;
     private SpriteFont _hudFont;
+    private SpriteBatch _hudBatch;
     private bool _editorActive;
 
     // Sessão ativa: o navigator é dono da pilha/cache de níveis; aqui só se referencia o topo.
@@ -76,6 +78,7 @@ public class Game1 : Game
         var cubes = new CubeRenderer(GraphicsDevice, faceMask);
         _renderSystem = new RenderSystem(cubes);
         _hudFont = Content.Load<SpriteFont>("Hud");
+        _hudBatch = new SpriteBatch(GraphicsDevice);
         _editorRenderer = new EditorRenderer(GraphicsDevice, cubes, _hudFont);
 
         // Começa na raiz da árvore de níveis (um nível como qualquer outro). O navigator
@@ -143,6 +146,11 @@ public class Game1 : Game
         // T = suspender: sai pro pai preservando este nível (volta exatamente onde parou).
         else if (Pressed(keyboard, Keys.T))
             _navigator.SuspendActive();
+        // Ponto/vírgula saltam pro próximo/anterior nível na ordem dos ids (com wrap).
+        else if (Pressed(keyboard, Keys.OemPeriod))
+            JumpRelative(+1);
+        else if (Pressed(keyboard, Keys.OemComma))
+            JumpRelative(-1);
 
         _movementSystem.Update(Active, keyboard);
 
@@ -162,6 +170,24 @@ public class Game1 : Game
         _previousKeyboard = keyboard;
 
         base.Update(gameTime);
+    }
+
+    /// <summary>
+    /// Salta <paramref name="step"/> posições na lista ordenada de ids do repositório, com
+    /// wrap nas pontas. Ignora a árvore de portais — é um atalho de navegação direta.
+    /// </summary>
+    private void JumpRelative(int step)
+    {
+        var ids = _levelRepo.ListIds().OrderBy(id => id).ToList();
+        if (ids.Count == 0)
+            return;
+
+        int idx = ids.IndexOf(Active.LevelId);
+        // Nível atual fora do repositório (não deve acontecer): começa da primeira posição.
+        if (idx < 0)
+            idx = 0;
+
+        _navigator.JumpTo(ids[(idx + step + ids.Count) % ids.Count]);
     }
 
     private void ReframeCamera()
@@ -209,8 +235,29 @@ public class Game1 : Game
         // Overlay do editor (cursor + HUD) por cima da cena.
         if (_editorActive)
             _editorRenderer.Draw(Active, _editor, _camera.View, _camera.Projection);
+        else
+            DrawLevelHud();
 
         base.Draw(gameTime);
+    }
+
+    /// <summary>HUD do jogo: nível atual no canto superior esquerdo e o atalho de troca.</summary>
+    private void DrawLevelHud()
+    {
+        string label = Active.LevelId == LevelCatalog.RootId
+            ? "Nivel 0 (raiz)"
+            : $"Nivel {Active.LevelId}";
+
+        _hudBatch.Begin();
+        DrawShadowed(label, new Vector2(16, 12), Color.White);
+        DrawShadowed("< > troca nivel", new Vector2(16, 12 + _hudFont.LineSpacing), Color.LightGray * 0.8f);
+        _hudBatch.End();
+    }
+
+    private void DrawShadowed(string text, Vector2 pos, Color color)
+    {
+        _hudBatch.DrawString(_hudFont, text, pos + Vector2.One, Color.Black * 0.7f);
+        _hudBatch.DrawString(_hudFont, text, pos, color);
     }
 
     protected override void Dispose(bool disposing)
