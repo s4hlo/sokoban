@@ -103,14 +103,25 @@ public static class PressurePlateSystem
             else if (!t.SolidByDefault && isSolid)
                 toRemove.Add(e);
             else if (t.SolidByDefault)
-                // Já sólido, mas o grid foi zerado pelo restart: reocupa a célula.
-                session.Grid.Place(p.X, p.Y, p.Z, e);
+            {
+                // Já sólido, mas o grid foi zerado (restart, ou Restore do solver): reocupa a
+                // célula — só se estiver livre. Ocupada por uma peça, fica pendente igual ao
+                // materializar da Resolve logo abaixo (que tenta de novo quando a célula libera).
+                if (session.Grid.Occupant(p.X, p.Y, p.Z) is null)
+                    session.Grid.Place(p.X, p.Y, p.Z, e);
+                else
+                    toRemove.Add(e);
+            }
         });
 
         foreach (var e in toRemove)
             session.World.Remove<Solid>(e);
         foreach (var (e, p) in toAdd)
         {
+            // Mesma cautela: célula ocupada por uma peça não materializa — fica pendente, a
+            // Resolve final tenta de novo quando a célula liberar.
+            if (session.Grid.Occupant(p.X, p.Y, p.Z) is not null)
+                continue;
             session.World.Add(e, new Solid());
             session.Grid.Place(p.X, p.Y, p.Z, e);
         }

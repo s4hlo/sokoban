@@ -66,4 +66,5 @@ internal static class TestLevels
         }
         throw new DirectoryNotFoundException("Não achei Sokoban3D/Maps subindo a partir de " + AppContext.BaseDirectory);
     }
+
 }

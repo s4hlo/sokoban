@@ -44,7 +44,11 @@ public class MovementSystem
     // junto do Snapshot e conferidas no SettleAndCommit (ver Core.Fragility).
     private List<(Entity Box, Entity Loader)> _fragileLoads = new();
 
-    public void Update(GameWorld session, KeyboardState keyboard)
+    /// <summary>
+    /// Devolve a direção processada neste frame ((0,0) se nenhuma) — o chamador usa pra
+    /// gravar a tentativa (<see cref="Solver.SolutionRecorder"/>) sem reler o teclado.
+    /// </summary>
+    public (int Dx, int Dz) Update(GameWorld session, KeyboardState keyboard)
     {
         // Wrapper fino de input: só a detecção de borda do teclado mora aqui. Toda a regra
         // vive no Step, que também serve chamadores headless (solver, testes).
@@ -52,9 +56,10 @@ public class MovementSystem
         _previous = keyboard;
 
         if (dx == 0 && dz == 0)
-            return;
+            return (0, 0);
 
         Step(session, dx, dz);
+        return (dx, dz);
     }
 
     /// <summary>
@@ -103,10 +108,11 @@ public class MovementSystem
         // e o passo é direto em qualquer direção. O snapshot vem ANTES do olhar mudar, pra o
         // turno gravar o facing anterior — é ele que o undo restaura.
         var before = Snapshot();
-        if (!(dx == facing.Dx && dz == facing.Dz))
+        bool facingChanged = !(dx == facing.Dx && dz == facing.Dz);
+        if (facingChanged)
             _world.World.Set(player.Value, new Facing { Dx = dx, Dz = dz });
 
-        TryMovePlayer(player.Value, pos, dx, dz, before);
+        TryMovePlayer(player.Value, pos, dx, dz, before, facingChanged);
     }
 
     /// <summary>
@@ -127,17 +133,32 @@ public class MovementSystem
     }
 
     private void TryMovePlayer(Entity player, GridPosition pos, int dx, int dz,
-        Dictionary<Entity, (GridPosition Pos, bool Solid, Facing? Face)> before)
+        Dictionary<Entity, (GridPosition Pos, bool Solid, Facing? Face)> before, bool facingChanged)
     {
         int targetX = pos.X + dx;
         int targetZ = pos.Z + dz;
 
+        // Passo travado (fora do grid, sticky ou empurrão bloqueado): ninguém se move, mas se o
+        // olhar já mudou em Step, ainda é um turno de verdade — precisa commitar pro Undo
+        // conseguir reverter o giro (senão o facing fica preso, sem registro no histórico).
+        void Bail()
+        {
+            if (facingChanged)
+                SettleAndCommit(player, before);
+        }
+
         if (!_world.Grid.IsValid(targetX, pos.Y, targetZ))
+        {
+            Bail();
             return;
+        }
 
         // Sticky logo atrás do passo: o grude segura o player (não dá pra se afastar dele).
         if (Stickiness.Holds(_world, player, dx, dz))
+        {
+            Bail();
             return;
+        }
 
         // Peças que mudaram de célula via portal neste turno: o render delas precisa aparecer
         // direto no destino, sem deslizar pelo mapa. Preenchido no PushInto e no passo do player.
@@ -148,7 +169,10 @@ public class MovementSystem
         // como o PushInto só muta em caminhos de sucesso, o snapshot é descartado intacto.
         var playerTo = PushInto(targetX, pos.Y, targetZ, dx, dz, PlayerPushStrength, new HashSet<Entity>());
         if (playerTo is null)
+        {
+            Bail();
             return;
+        }
 
         // Parou fora da célula pra onde deu o passo → atravessou um portal: anima o teleporte.
         if (playerTo.Value.X != targetX || playerTo.Value.Y != pos.Y || playerTo.Value.Z != targetZ)

@@ -39,6 +39,10 @@ public class Game1 : Game
     private SolverRenderer _solverRenderer;
     private bool _solverActive;
 
+    // Gravador de certificado (dev tool): acumula as ações da tentativa atual e, na vitória,
+    // salva Solutions/level_N.moves pro oráculo de solvabilidade (se ainda não existir).
+    private SolutionRecorder _recorder;
+
     // Sessão ativa: o navigator é dono da pilha/cache de níveis; aqui só se referencia o topo.
     private GameWorld Active => _navigator.Active;
 
@@ -67,6 +71,11 @@ public class Game1 : Game
         _animationSystem = new MoveAnimationSystem();
         _navigator = new LevelNavigator(_levelManager, _catalog);
         _navigator.LevelChanged += ReframeCamera;
+
+        // O log do certificado é por nível: cada troca de sessão só aponta o gravador pro nível
+        // ativo (retomar um suspenso continua o log dele); resetar de verdade é outra ação (R/F).
+        _recorder = new SolutionRecorder();
+        _navigator.LevelChanged += () => _recorder.Track(Active.LevelId);
 
         _editor = new LevelEditor(_levelManager, _levelRepo);
         // Redimensionar o grid no editor exige reenquadrar a câmera.
@@ -137,12 +146,22 @@ public class Game1 : Game
 
         // P alterna o solver-playback (dev tool). Ao entrar, o nível reseta pro estado de
         // receita (o solver resolve a partir do zero) e a solução executa sozinha.
-        if (Pressed(keyboard, Keys.P))
+        // C é o irmão do P: mesmo playback, mas tocando o CERTIFICADO gravado
+        // (Solutions/level_N.moves) em vez de buscar. Qualquer um dos dois sai do modo.
+        bool searchKey = Pressed(keyboard, Keys.P);
+        bool certificateKey = !searchKey && Pressed(keyboard, Keys.C);
+        if (searchKey || certificateKey)
         {
             _solverActive = !_solverActive;
             if (_solverActive)
             {
-                _solver.Enter(Active);
+                if (searchKey)
+                    _solver.Enter(Active);
+                else
+                    _solver.EnterCertificate(Active);
+                // O solver também reseta o mundo pro estado de receita (FullReset) — o log da
+                // tentativa reseta junto, senão jogadas manuais de antes vazam pro certificado.
+                _recorder.Reset(Active.LevelId);
                 // FullReset é instantâneo: encaixa o render sem deslizar, como no F.
                 _animationSystem.SnapAll(Active);
             }
@@ -170,9 +189,13 @@ public class Game1 : Game
             // Reset total: descarta tudo e recarrega o nível do zero (entidades, grid e histórico).
             _levelManager.FullReset(Active);
             _animationSystem.SnapAll(Active);
+            _recorder.Reset(Active.LevelId);
         }
         else if (Pressed(keyboard, Keys.R))
+        {
             _levelManager.Restart(Active);
+            _recorder.Reset(Active.LevelId);
+        }
         else if (Pressed(keyboard, Keys.Z))
         {
             // Undo canônico (regras no MovementSystem.Undo). Não snapa: deixa o RenderPosition
@@ -180,7 +203,10 @@ public class Game1 : Game
             // normal. Quem voltou atravessando um portal ganha a animação de teleporte
             // reconstruída do mundo (o histórico não guarda portal) — parte de render, só aqui.
             if (_movementSystem.Undo(Active))
+            {
                 _movementSystem.AnimateUndoTeleports(Active, Active.History.LastReverted);
+                _recorder.RecordUndo();
+            }
         }
         // T = suspender: sai pro pai preservando este nível (volta exatamente onde parou).
         else if (Pressed(keyboard, Keys.T))
@@ -191,7 +217,8 @@ public class Game1 : Game
         else if (Pressed(keyboard, Keys.OemComma))
             JumpRelative(-1);
 
-        _movementSystem.Update(Active, keyboard);
+        var stepped = _movementSystem.Update(Active, keyboard);
+        _recorder.RecordStep(stepped.Dx, stepped.Dz);
 
         // Placas de pressão são estado derivado da posição das peças: re-deriva todo frame,
         // independente do que mexeu nas posições (movimento, undo ou nada).
@@ -200,9 +227,13 @@ public class Game1 : Game
         _animationSystem.Update(Active, (float)gameTime.ElapsedGameTime.TotalSeconds);
 
         // Pisar na meta CONCLUI o nível: volta pro pai e reseta este nível (próxima visita
-        // começa do zero). Senão, Enter sobre um portal mergulha no nível indicado.
+        // começa do zero). A tentativa vencedora vira certificado de solvabilidade do oráculo,
+        // se o nível ainda não tem um. Senão, Enter sobre um portal mergulha no nível indicado.
         if (PlayerOnObjective(Active))
+        {
+            _recorder.SaveOnWin(Active);
             _navigator.CompleteActive();
+        }
         else if (Pressed(keyboard, Keys.Enter))
             _navigator.TryEnterPortal();
 
@@ -276,10 +307,6 @@ public class Game1 : Game
             _editorRenderer.Draw(Active, _editor, _camera.View, _camera.Projection);
         else
             DrawLevelHud();
-
-        // HUD do solver-playback por cima da cena.
-        if (_solverActive)
-            _solverRenderer.Draw(_solver);
 
         // HUD do solver-playback por cima da cena.
         if (_solverActive)
