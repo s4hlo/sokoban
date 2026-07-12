@@ -40,6 +40,8 @@ public enum BoxType
     Permanent, // verde: empurra como leve, mas o reverso não a desfaz (só o R volta ela)
     Portal,  // teleporta quem tenta entrar nela pro lado oposto do portal parceiro (mesmo Group)
     Magnetic, // gruda no player que encostar (ver Core.Magnetism): vira parte do corpo dele
+    Collectible, // empurrada em cadeia por outra caixa é leve comum; tocada DIRETO pelo player,
+                 // some (conta pra liberar o objetivo — ver Core.Collectibles) em vez de andar
 }
 
 /// <summary>
@@ -66,6 +68,7 @@ public static class BoxRules
         BoxType.Permanent => 0, // mesmo peso da leve (empurra de graça)
         BoxType.Portal => 0,    // empurrada de graça (só quando a saída está bloqueada)
         BoxType.Magnetic => 1,  // solta, empurra como média; grudada não é empurrável (é corpo)
+        BoxType.Collectible => 0, // mesmo peso da leve (empurra de graça em cadeia)
         _ => 1,
     };
 }

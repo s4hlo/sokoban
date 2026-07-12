@@ -268,7 +268,11 @@ public class Game1 : Game
 
     // ----- Consultas ao mundo -----
 
-    /// <summary>True se a célula do player coincide com a de algum objetivo do nível.</summary>
+    /// <summary>
+    /// True se a célula do player coincide com a de algum objetivo do nível E não há coletável
+    /// pendente (ver <see cref="Collectibles"/>) — com algum ainda por coletar, a meta fica
+    /// desabilitada e pisar nela não faz nada.
+    /// </summary>
     private static bool PlayerOnObjective(GameWorld session)
     {
         var playerPos = FindPlayerCell(session);
@@ -276,7 +280,8 @@ public class Game1 : Game
             return false;
 
         var p = playerPos.Value;
-        return session.Spatial.CellWith<Objective>(p.X, p.Y, p.Z) is not null;
+        return session.Spatial.CellWith<Objective>(p.X, p.Y, p.Z) is not null
+            && Collectibles.AllCollected(session);
     }
 
     private static GridPosition? FindPlayerCell(GameWorld session)

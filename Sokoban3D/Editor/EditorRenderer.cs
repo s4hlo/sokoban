@@ -71,6 +71,7 @@ public class EditorRenderer
         (new PaletteItem(EditorBrush.Box, BoxType.Fragile), "2", "Caixa fragil"),
         (new PaletteItem(EditorBrush.Box, BoxType.Permanent), "2", "Caixa verde"),
         (new PaletteItem(EditorBrush.Box, BoxType.Magnetic), "2", "Caixa magnetica"),
+        (new PaletteItem(EditorBrush.Box, BoxType.Collectible), "2", "Caixa coletavel"),
         (new PaletteItem(EditorBrush.Objective), "3", "Meta"),
         (new PaletteItem(EditorBrush.Portal), "4", "Portal"),
         (new PaletteItem(EditorBrush.Player), "5", "Player"),

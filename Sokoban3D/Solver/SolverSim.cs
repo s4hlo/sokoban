@@ -95,13 +95,14 @@ public sealed class SolverSim
         }
     }
 
-    /// <summary>True se o player está sobre um objetivo (mesma regra do Game1).</summary>
+    /// <summary>True se o player está sobre um objetivo e não há coletável pendente (mesma regra do Game1).</summary>
     public bool IsSolved
     {
         get
         {
             var p = _session.World.Get<GridPosition>(_player);
-            return _session.Spatial.CellWith<Objective>(p.X, p.Y, p.Z) is not null;
+            return _session.Spatial.CellWith<Objective>(p.X, p.Y, p.Z) is not null
+                && Collectibles.AllCollected(_session);
         }
     }
 

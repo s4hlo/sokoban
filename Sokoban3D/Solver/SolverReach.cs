@@ -206,9 +206,15 @@ public sealed class SolverReach
         return h;
     }
 
-    /// <summary>A célula de algum objetivo dentro da região (vitória por caminhada), ou null.</summary>
+    /// <summary>
+    /// A célula de algum objetivo dentro da região (vitória por caminhada), ou null. Com
+    /// coletável pendente (ver <see cref="Collectibles"/>) o objetivo fica desabilitado — a
+    /// célula continua caminhada inerte comum, sem gatilho de vitória nenhum.
+    /// </summary>
     public (int X, int Y, int Z)? ObjectiveIn(Region region)
     {
+        if (!Collectibles.AllCollected(_session))
+            return null;
         foreach (var o in _objectives)
             if (region.Set.Contains(o))
                 return o;

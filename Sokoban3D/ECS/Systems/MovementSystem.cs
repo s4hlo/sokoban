@@ -167,7 +167,7 @@ public class MovementSystem
         // Resolve onde o player de fato pára: a célula alvo pode estar livre, ser liberada por um
         // empurrão, ou (caixa portal) redirecionar pra outro lugar. null = jogada impossível, e
         // como o PushInto só muta em caminhos de sucesso, o snapshot é descartado intacto.
-        var playerTo = PushInto(targetX, pos.Y, targetZ, dx, dz, PlayerPushStrength, new HashSet<Entity>());
+        var playerTo = PushInto(targetX, pos.Y, targetZ, dx, dz, PlayerPushStrength, new HashSet<Entity>(), direct: true);
         if (playerTo is null)
         {
             Bail();
@@ -220,7 +220,7 @@ public class MovementSystem
         bool ok = true;
         foreach (var (_, to) in pieces)
         {
-            var landing = PushInto(to.X, to.Y, to.Z, dx, dz, PlayerPushStrength, new HashSet<Entity>());
+            var landing = PushInto(to.X, to.Y, to.Z, dx, dz, PlayerPushStrength, new HashSet<Entity>(), direct: true);
             if (landing is null || landing.Value.X != to.X || landing.Value.Y != to.Y || landing.Value.Z != to.Z)
             {
                 ok = false;
@@ -294,14 +294,14 @@ public class MovementSystem
 
             // A diagonal é varrida na direção do giro; o destino, pra "trás" do offset antigo.
             // As duas células precisam FICAR livres (redirecionamento de portal não serve).
-            var atDiag = PushInto(diagX, pos.Y, diagZ, nx, nz, PlayerPushStrength, new HashSet<Entity>());
+            var atDiag = PushInto(diagX, pos.Y, diagZ, nx, nz, PlayerPushStrength, new HashSet<Entity>(), direct: true);
             if (atDiag is null || atDiag.Value.X != diagX || atDiag.Value.Y != pos.Y || atDiag.Value.Z != diagZ)
             {
                 ok = false;
                 break;
             }
 
-            var atDest = PushInto(destX, pos.Y, destZ, -ox, -oz, PlayerPushStrength, new HashSet<Entity>());
+            var atDest = PushInto(destX, pos.Y, destZ, -ox, -oz, PlayerPushStrength, new HashSet<Entity>(), direct: true);
             if (atDest is null || atDest.Value.X != destX || atDest.Value.Y != pos.Y || atDest.Value.Z != destZ)
             {
                 ok = false;
@@ -427,8 +427,12 @@ public class MovementSystem
     /// Como uma caixa empurrada é resolvida pelo mesmo PushInto, empurrá-la CONTRA um portal
     /// teleporta a própria caixa. Só causa mutações nos caminhos que terminam em sucesso.
     /// O conjunto <paramref name="visited"/> impede um par de portais de encadear teleporte infinito.
+    /// <paramref name="direct"/> é true só na célula tocada DIRETO pelo player (ou por uma peça do
+    /// corpo rígido magnético) — a chamada recursiva de uma caixa empurrando a próxima é sempre
+    /// indireta. Distingue as duas pra <see cref="BoxType.Collectible"/>: tocada direto, é
+    /// destruída (coletada); empurrada em cadeia, anda como uma caixa leve comum.
     /// </summary>
-    private GridPosition? PushInto(int x, int y, int z, int dx, int dz, int budget, HashSet<Entity> visited)
+    private GridPosition? PushInto(int x, int y, int z, int dx, int dz, int budget, HashSet<Entity> visited, bool direct)
     {
         if (!_world.Grid.IsValid(x, y, z))
             return null; // parede / fora do grid
@@ -449,7 +453,7 @@ public class MovementSystem
             if (partner is not null)
             {
                 var b = _world.World.Get<GridPosition>(partner.Value);
-                var through = PushInto(b.X + dx, b.Y, b.Z + dz, dx, dz, budget, visited);
+                var through = PushInto(b.X + dx, b.Y, b.Z + dz, dx, dz, budget, visited, direct);
                 if (through is not null)
                     return through; // atravessou: pára do lado oposto da parceira
             }
@@ -474,14 +478,25 @@ public class MovementSystem
             return PushBigBox(occ, x, y, z, dx, dz);
 
         var box = _world.World.Get<Box>(occ);
+
+        // Coletável tocado DIRETO (player ou peça do corpo, não uma caixa empurrando em cadeia):
+        // não anda, é destruído na hora e conta pra liberar o objetivo (Core.Collectibles). Em
+        // cadeia, cai no tratamento comum abaixo — anda igual a uma caixa leve (peso 0).
+        if (box.Type == BoxType.Collectible && direct)
+        {
+            BreakBox(occ);
+            return new GridPosition(x, y, z);
+        }
+
         int weight = BoxRules.Weight(box.Type);
         if (weight > budget)
             return null; // pesada demais pra força restante: não sai do lugar
 
-        // Caixa sem peso (leve/frágil/verde/portal) não transmite força: passa orçamento 0 pra
-        // frente, então não empurra nada com peso. As com peso repassam a força que sobra.
+        // Caixa sem peso (leve/frágil/verde/portal/coletável) não transmite força: passa
+        // orçamento 0 pra frente, então não empurra nada com peso. As com peso repassam a força
+        // que sobra.
         int forwardBudget = weight == 0 ? 0 : budget - weight;
-        var boxLanding = PushInto(x + dx, y, z + dz, dx, dz, forwardBudget, visited);
+        var boxLanding = PushInto(x + dx, y, z + dz, dx, dz, forwardBudget, visited, direct: false);
 
         if (boxLanding is not null)
         {
@@ -659,8 +674,8 @@ public class MovementSystem
     }
 
     /// <summary>
-    /// Quebra a caixa: libera a célula e remove o tag <see cref="Solid"/> — deixa de ocupar
-    /// o grid e de ser desenhada. A entity persiste pra o undo conseguir reverter a quebra.
+    /// Quebra (ou coleta) a caixa: libera a célula e remove o tag <see cref="Solid"/> — deixa de
+    /// ocupar o grid e de ser desenhada. A entity persiste pra o undo conseguir reverter.
     /// </summary>
     private void BreakBox(Entity entity)
     {

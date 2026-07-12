@@ -647,7 +647,7 @@ public class LevelEditor
     private static readonly BoxType[] BoxCycle =
     {
         BoxType.Light, BoxType.Medium, BoxType.Heavy,
-        BoxType.Fragile, BoxType.Permanent, BoxType.Magnetic,
+        BoxType.Fragile, BoxType.Permanent, BoxType.Magnetic, BoxType.Collectible,
     };
 
     /// <summary>

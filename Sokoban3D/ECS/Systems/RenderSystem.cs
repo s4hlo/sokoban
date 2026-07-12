@@ -25,8 +25,10 @@ public class RenderSystem
     // grudada, quando o olhar decide se um comando anda ou gira).
     private static readonly Color PlayerNoseColor = new(230, 238, 250);
 
-    // Meta do nível (dourado) e portais para níveis filhos (ciano; verde quando concluído).
+    // Meta do nível (dourado; apagada enquanto houver coletável pendente) e portais para níveis
+    // filhos (ciano; verde quando concluído).
     private static readonly Color ObjectiveColor = new(235, 200, 70);
+    private static readonly Color ObjectiveLockedColor = new(110, 100, 80);
     private static readonly Color PortalColor = new(70, 200, 210);
     private static readonly Color PortalDoneColor = new(70, 200, 110);
 
@@ -53,6 +55,8 @@ public class RenderSystem
     private static readonly Color PortalBoxColor = new(200, 70, 200);
     // Caixa magnética: aço azulado, meio-termo entre as caixas de madeira e o player azul.
     private static readonly Color MagneticBoxColor = new(140, 160, 185);
+    // Coletável: dourado vivo, ecoando a cor da meta que ele libera.
+    private static readonly Color CollectibleBoxColor = new(230, 195, 60);
 
     // Sessão ativa do frame. O CubeRenderer (preso ao device) é reutilizado entre sessões
     // e compartilhado com o editor — por isso vem injetado, não criado aqui.
@@ -109,11 +113,12 @@ public class RenderSystem
         var grid = _world.Grid;
         var tileScale = new Vector3(0.7f, 0.1f, 0.7f);
 
+        var objectiveColor = Collectibles.AllCollected(_world) ? ObjectiveColor : ObjectiveLockedColor;
         var objectives = new QueryDescription().WithAll<Objective, GridPosition>();
         _world.World.Query(in objectives, (ref GridPosition p) =>
         {
             var pos = GridView.ToWorld(grid, p.X, p.Y, p.Z, GridView.MarkerRise);
-            _cubes.Draw(pos, tileScale, ObjectiveColor, view, projection);
+            _cubes.Draw(pos, tileScale, objectiveColor, view, projection);
         });
 
         var portals = new QueryDescription().WithAll<LevelPortal, GridPosition>();
@@ -274,6 +279,7 @@ public class RenderSystem
         BoxType.Permanent => PermanentBoxColor,
         BoxType.Portal => PortalBoxColor,
         BoxType.Magnetic => MagneticBoxColor,
+        BoxType.Collectible => CollectibleBoxColor,
         _ => MediumBoxColor,
     };
 }
