@@ -70,6 +70,10 @@ $RECYCLE.BIN/
 .Spotlight-V100
 .Trashes
 
+# ---- Publish / distribuição ----
+publish/
+*.zip
+
 # ---- Misc ----
 *.log
 *.tmp
