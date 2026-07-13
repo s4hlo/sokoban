@@ -59,6 +59,10 @@ public class EditorRenderer
     // Item sob o ponteiro no último HitTestBrush (chamado todo frame), pro highlight de hover.
     private PaletteItem? _hoverItem;
 
+    // Caixas de clique das linhas da lista de níveis (índice = posição na lista), preenchidas a
+    // cada DrawLevelListPanel — o clique acerta exatamente a linha desenhada.
+    private readonly List<Rectangle> _levelHitboxes = new();
+
     // A paleta na ordem do HUD: tecla de atalho + nome. Cada tipo de caixa tem a própria
     // linha (a tecla 2 cicla entre elas; o clique escolhe direto). A cor vem de ItemColor.
     private static readonly (PaletteItem Item, string Key, string Name)[] Palette =
@@ -96,12 +100,79 @@ public class EditorRenderer
 
     public void Draw(GameWorld session, LevelEditor editor, Matrix view, Matrix projection)
     {
+        // Lista de reordenação: painel modal sobre a cena, sem os overlays de edição.
+        if (editor.ShowLevelList)
+        {
+            DrawLevelListPanel(editor);
+            return;
+        }
+
         if (editor.ShowPlane)
             DrawBuildPlane(session, editor, view, projection);
         DrawGhost(session, editor, view, projection);
         DrawCursor(session, editor, view, projection);
         DrawLabels(session, view, projection);
         DrawHud(editor);
+    }
+
+    /// <summary>
+    /// Painel da lista de níveis (tecla L): id + nome de cada nível na ordem dos ids, com a linha
+    /// selecionada realçada e o nível em edição marcado. W/S navega, Shift+W/S troca o selecionado
+    /// de posição (reordena os ids), Enter/clique vai pro nível. As linhas são clicáveis (hitboxes
+    /// preenchidas aqui, consumidas por <see cref="HitTestLevelRow"/>).
+    /// </summary>
+    private void DrawLevelListPanel(LevelEditor editor)
+    {
+        _spriteBatch.Begin();
+        float lh = _font.LineSpacing;
+        var list = editor.LevelList;
+
+        const string header = "NIVEIS";
+        const string hint = "W/S: navegar   clique/Enter: ir   Shift+W/S: mover   L/Esc: fechar";
+
+        float width = Math.Max(_font.MeasureString(header).X, _font.MeasureString(hint).X);
+        foreach (var (id, name) in list)
+            width = Math.Max(width, _font.MeasureString($"#{id:D2}  {name}   (atual)").X);
+
+        int rows = Math.Max(1, list.Count) + 2; // header + dica + linhas
+        var panel = new Rectangle(Pad, Pad, (int)width + Pad * 2, (int)(rows * lh) + Pad * 2);
+        Fill(panel, PanelBg);
+
+        float x = panel.X + Pad, y = panel.Y + Pad;
+        DrawShadowed(header, new Vector2(x, y), HeaderColor);
+        y += lh;
+        DrawShadowed(hint, new Vector2(x, y), HintColor);
+        y += lh * 1.4f;
+
+        _levelHitboxes.Clear();
+        for (int i = 0; i < list.Count; i++)
+        {
+            var (id, name) = list[i];
+            var row = new Rectangle(panel.X, (int)y, panel.Width, (int)lh);
+            bool selected = i == editor.ListSelection;
+            if (selected)
+                Fill(row, Color.White * 0.14f);
+            string marker = id == editor.Working.Id ? "   (atual)" : "";
+            DrawShadowed($"#{id:D2}  {name}{marker}", new Vector2(x, y), selected ? Color.White : TextColor);
+            _levelHitboxes.Add(row);
+            y += lh;
+        }
+        if (list.Count == 0)
+            DrawShadowed("(nenhum nivel salvo)", new Vector2(x, y), HintColor);
+
+        _spriteBatch.End();
+    }
+
+    /// <summary>
+    /// Índice da linha da lista de níveis sob o ponto de tela, ou null se nenhuma. Usa as caixas
+    /// desenhadas no último frame (mesmo padrão do <see cref="HitTestBrush"/>).
+    /// </summary>
+    public int? HitTestLevelRow(int x, int y)
+    {
+        for (int i = 0; i < _levelHitboxes.Count; i++)
+            if (_levelHitboxes[i].Contains(x, y))
+                return i;
+        return null;
     }
 
     private const float GhostAlpha = 0.4f;
@@ -303,9 +374,10 @@ public class EditorRenderer
             {
                 ("EDITOR", HeaderColor),
                 (editor.IsDirty ? " *" : "", WarnColor), // asterisco: edições não salvas
-                ($"  {editor.Working.Name}", TextColor),
+                // Renomeando: mostra o buffer com um caret em vez do nome fixo.
+                editor.IsRenaming ? ($"  {editor.NameBuffer}_", OkColor) : ($"  {editor.Working.Name}", TextColor),
                 ($"  #{editor.Working.Id}", HintColor), // id do nível (arquivo/portais/navegação)
-                ("   [Tab] jogar", HintColor),
+                (editor.IsRenaming ? "   [Enter] ok  [Esc] cancela" : "   [Tab] jogar", HintColor),
             },
             new[]
             {
@@ -510,6 +582,8 @@ public class EditorRenderer
             ("Ctrl+O", TextColor), (" carrega   ", HintColor),
             ("Ctrl+N", TextColor), (" novo   ", HintColor),
             ("Ctrl+D", TextColor), (" duplica   ", HintColor),
+            ("R", TextColor), (" renomeia   ", HintColor),
+            ("L", TextColor), (" lista/ordena   ", HintColor),
             ("V", TextColor), (" valida   ", HintColor),
             ("G", TextColor), (" grade   ", HintColor),
             ("H", TextColor), (" ajuda", HintColor),

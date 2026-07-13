@@ -82,6 +82,24 @@ public class LevelEditor
     private enum Confirm { None, New, Load }
     private Confirm _pendingConfirm = Confirm.None;
 
+    // Renomear inline: enquanto ativo, o teclado alimenta o buffer (via OnTextInput, o evento de
+    // texto do Game1) em vez de mover o cursor; Enter confirma, Esc cancela.
+    private bool _renaming;
+    private string _nameBuffer = "";
+
+    // Lista de níveis pra reordenar (snapshot id+nome do repositório, montado ao abrir e a cada
+    // troca). Modal como o rename: enquanto aberta, o teclado navega/reordena a lista.
+    private readonly List<(int Id, string Name)> _levelList = new();
+    private int _listSelection;
+    // Pedido de pular pra edição de outro nível (Enter na lista), consumido pelo Game1 após a
+    // Update. Não trocamos a sessão aqui dentro: quem faz é o navigator, senão o nível pulado
+    // viraria a raiz da pilha e concluir a meta não voltaria pro pai.
+    private int? _pendingJump;
+    // Houve reordenação (troca de ids em disco) nesta sessão de edição? O Game1 consome ao sair
+    // ou pular pra reconstruir a navegação — o cache do navigator é por id e vira obsoleto. Não
+    // é resetado no Enter: precisa sobreviver ao Enter da lista (que reabre o editor).
+    private bool _repoReordered;
+
     // ----- Estado exposto pro renderer -----
     public int CursorX { get; private set; }
     public int CursorY { get; private set; }
@@ -116,6 +134,18 @@ public class LevelEditor
     public bool ShowPlane { get; private set; } = true;
     /// <summary>Último veredito de solvabilidade (tecla V). Zera pra Idle a cada edição.</summary>
     public EditorValidation Validation { get; private set; } = EditorValidation.Idle;
+    /// <summary>True enquanto se digita o novo nome do nível (Ctrl+R). O HUD mostra o buffer.</summary>
+    public bool IsRenaming => _renaming;
+    /// <summary>Texto sendo digitado no rename (só válido com <see cref="IsRenaming"/>).</summary>
+    public string NameBuffer => _nameBuffer;
+    /// <summary>Lista de níveis pra reordenar (tecla L) está aberta.</summary>
+    public bool ShowLevelList { get; private set; }
+    /// <summary>True em qualquer modo modal (rename ou lista): o Game1 segura Tab/Esc.</summary>
+    public bool IsModal => _renaming || ShowLevelList;
+    /// <summary>Níveis (id+nome) da lista de reordenação, na ordem dos ids.</summary>
+    public IReadOnlyList<(int Id, string Name)> LevelList => _levelList;
+    /// <summary>Índice do nível selecionado na lista de reordenação.</summary>
+    public int ListSelection => _listSelection;
 
     // Matrizes da câmera do editor, consumidas pelo Game1 pra desenhar a cena enquanto edita.
     public Matrix View => _cam.View;
@@ -151,6 +181,9 @@ public class LevelEditor
         Validation = EditorValidation.Idle;
         _validationTask = null;
         _pendingConfirm = Confirm.None;
+        _renaming = false;
+        ShowLevelList = false;
+        _pendingJump = null;
 
         CursorX = _working.Width / 2;
         CursorZ = _working.Depth / 2;
@@ -185,7 +218,7 @@ public class LevelEditor
     }
 
     public void Update(GameWorld session, KeyboardState keyboard, MouseState mouse,
-        Viewport viewport, PaletteItem? hudBrush)
+        Viewport viewport, PaletteItem? hudBrush, int? hudLevelRow = null)
     {
         _session = session;
         _viewport = viewport;
@@ -199,6 +232,23 @@ public class LevelEditor
         }
         _view = _cam.View;
         _projection = _cam.Projection;
+
+        // Modos modais: enquanto renomeia ou navega a lista, o teclado vai só pra eles (o
+        // texto do rename chega pelo evento OnTextInput). A cena segue desenhada por trás.
+        if (_renaming)
+        {
+            HandleRename(keyboard);
+            _prev = keyboard;
+            _prevMouse = mouse;
+            return;
+        }
+        if (ShowLevelList)
+        {
+            HandleLevelList(keyboard, mouse, hudLevelRow);
+            _prev = keyboard;
+            _prevMouse = mouse;
+            return;
+        }
 
         bool shift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
         bool ctrl = keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
@@ -244,6 +294,8 @@ public class LevelEditor
         if (Pressed(k, Keys.H)) ShowHelp = !ShowHelp;
         if (Pressed(k, Keys.G)) ShowPlane = !ShowPlane;
         if (Pressed(k, Keys.V)) Validate();
+        if (Pressed(k, Keys.L)) ToggleLevelList();
+        if (Pressed(k, Keys.R)) BeginRename();
     }
 
     // ----- Atalhos com Ctrl -----
@@ -257,6 +309,231 @@ public class LevelEditor
         if (Pressed(k, Keys.N)) NewBlank();
         if (Pressed(k, Keys.D)) Duplicate();
     }
+
+    // ----- Renomear (R) -----
+
+    private void BeginRename()
+    {
+        _renaming = true;
+        _nameBuffer = _working.Name ?? "";
+        SetStatus("Renomeando: digite, Enter confirma, Esc cancela");
+    }
+
+    /// <summary>
+    /// Recebe um caractere digitado (via o evento de texto do Game1). Só age em modo rename:
+    /// backspace apaga, caracteres imprimíveis entram (até 40). Enter/Esc ficam por conta do
+    /// <see cref="HandleRename"/> (teclado polado), pra não duplicar com o evento.
+    /// </summary>
+    public void OnTextInput(char c)
+    {
+        if (!_renaming)
+            return;
+        if (c == '\b')
+        {
+            if (_nameBuffer.Length > 0)
+                _nameBuffer = _nameBuffer[..^1];
+        }
+        else if (c >= ' ' && c != (char)127 && _nameBuffer.Length < 40)
+        {
+            _nameBuffer += c;
+        }
+    }
+
+    private void HandleRename(KeyboardState k)
+    {
+        if (Pressed(k, Keys.Enter)) CommitRename();
+        else if (Pressed(k, Keys.Escape)) CancelRename();
+    }
+
+    private void CommitRename()
+    {
+        _renaming = false;
+        var name = _nameBuffer.Trim();
+        if (name.Length == 0)
+        {
+            SetStatus("Nome vazio: mantido o anterior", warning: true);
+            return;
+        }
+        if (name == _working.Name)
+        {
+            SetStatus("Nome inalterado");
+            return;
+        }
+        PushUndo();
+        _working.Name = name;
+        SetStatus($"Renomeado para \"{name}\"");
+    }
+
+    private void CancelRename()
+    {
+        _renaming = false;
+        SetStatus("Renomear cancelado");
+    }
+
+    // ----- Lista de níveis / reordenar (L) -----
+
+    private void ToggleLevelList()
+    {
+        ShowLevelList = !ShowLevelList;
+        if (ShowLevelList)
+        {
+            RefreshLevelList();
+            SetStatus("Lista: W/S navega, Shift+W/S reordena, Enter edita, L/Esc fecha");
+        }
+    }
+
+    /// <summary>Remonta a lista (id+nome) a partir do repositório, ordenada por id.</summary>
+    private void RefreshLevelList()
+    {
+        _levelList.Clear();
+        foreach (var id in _repo.ListIds().OrderBy(i => i))
+            _levelList.Add((id, NameOf(id)));
+        _listSelection = Math.Clamp(_listSelection, 0, Math.Max(0, _levelList.Count - 1));
+    }
+
+    /// <summary>Nome de um nível: o do working (edições não salvas) se for ele, senão lê do disco.</summary>
+    private string NameOf(int id)
+    {
+        if (_working != null && _working.Id == id)
+            return _working.Name;
+        try { return _repo.Load(id).Name; }
+        catch { return "?"; }
+    }
+
+    private void HandleLevelList(KeyboardState k, MouseState mouse, int? hoverRow)
+    {
+        // Mouse: passar por cima de uma linha a seleciona (como o cursor 3D segue o ponteiro);
+        // clicar vai direto pro nível.
+        if (hoverRow is int row)
+        {
+            bool mouseMoved = mouse.X != _prevMouse.X || mouse.Y != _prevMouse.Y;
+            if (mouseMoved)
+                _listSelection = row;
+            if (LeftPressed(mouse))
+            {
+                _listSelection = row;
+                JumpToSelected();
+                return;
+            }
+        }
+
+        if (Pressed(k, Keys.L) || Pressed(k, Keys.Escape))
+        {
+            ShowLevelList = false;
+            return;
+        }
+        if (Pressed(k, Keys.Enter))
+        {
+            JumpToSelected();
+            return;
+        }
+        if (_levelList.Count == 0)
+            return;
+
+        // W/S (ou setas, se houver) navegam; Shift+W/S reordenam. WASD é a via principal — o
+        // teclado do usuário é 50%, sem cluster de setas.
+        bool shift = k.IsKeyDown(Keys.LeftShift) || k.IsKeyDown(Keys.RightShift);
+        bool up = Pressed(k, Keys.W) || Pressed(k, Keys.Up);
+        bool down = Pressed(k, Keys.S) || Pressed(k, Keys.Down);
+        if (up)
+        {
+            if (shift) MoveSelected(-1);
+            else _listSelection = Math.Max(0, _listSelection - 1);
+        }
+        else if (down)
+        {
+            if (shift) MoveSelected(+1);
+            else _listSelection = Math.Min(_levelList.Count - 1, _listSelection + 1);
+        }
+    }
+
+    /// <summary>
+    /// Fecha a lista e registra o pedido de pular pra edição do nível selecionado. A troca real
+    /// (via navigator, pra a sessão ativa e a pilha ficarem corretas) é feita pelo Game1 em
+    /// <see cref="TakePendingJump"/>, fora da Update do editor.
+    /// </summary>
+    private void JumpToSelected()
+    {
+        ShowLevelList = false;
+        if (_levelList.Count == 0)
+            return;
+
+        int id = _levelList[_listSelection].Id;
+        if (_working != null && id == _working.Id)
+        {
+            SetStatus($"Ja editando o nivel {id}");
+            return;
+        }
+
+        _pendingJump = id;
+        SetStatus($"Indo pro nivel {id}...");
+    }
+
+    /// <summary>
+    /// Consome (e limpa) um pedido de pulo pendente. O Game1 chama após a Update: se houver id,
+    /// devolve as edições à sessão atual (<see cref="Exit"/>), troca a sessão ativa pelo navigator
+    /// e reabre o editor nela (<see cref="Enter"/>) — assim o nível pulado entra como sessão de
+    /// verdade na árvore, e concluir a meta volta pro pai normalmente.
+    /// </summary>
+    public int? TakePendingJump()
+    {
+        var id = _pendingJump;
+        _pendingJump = null;
+        return id;
+    }
+
+    /// <summary>Move o selecionado em <paramref name="delta"/> na lista, trocando ids com o vizinho.</summary>
+    private void MoveSelected(int delta)
+    {
+        int i = _listSelection, j = i + delta;
+        if (j < 0 || j >= _levelList.Count)
+            return;
+
+        int idA = _levelList[i].Id, idB = _levelList[j].Id;
+        SwapLevelIds(idA, idB);
+        RefreshLevelList();
+        _listSelection = j; // a seleção segue o item movido
+        SetStatus($"Niveis {idA} <-> {idB} reordenados");
+    }
+
+    /// <summary>
+    /// Troca as identidades (ids/arquivos) de dois níveis — reordena a lista. O conteúdo troca de
+    /// arquivo; os portais NÃO são remapeados (mantêm o número que apontavam). Se um dos dois é o
+    /// nível em edição, usa a receita em memória (preservando edições não salvas) e ela passa a
+    /// ficar gravada com o novo id. Não entra no undo (é uma operação entre arquivos, não do design).
+    /// </summary>
+    private void SwapLevelIds(int idA, int idB)
+    {
+        var a = SwapSource(idA);
+        var b = SwapSource(idB);
+        a.Id = idB;
+        b.Id = idA;
+        _repo.Save(a);
+        _repo.Save(b);
+
+        // O working participou do swap: já foi gravado com o novo id, então não está mais "sujo".
+        if (_working != null && (_working.Id == idA || _working.Id == idB))
+            IsDirty = false;
+
+        // O catálogo em disco mudou de forma: o Game1 vai reconstruir a navegação ao sair/pular.
+        _repoReordered = true;
+        Log.Information("Editor: niveis {A} e {B} reordenados (ids trocados)", idA, idB);
+    }
+
+    /// <summary>
+    /// Consome (e limpa) o sinal de que houve reordenação de ids em disco. O Game1 chama nos
+    /// handoffs editor→jogo pra reconstruir a navegação (<see cref="LevelNavigator.Reload"/>).
+    /// </summary>
+    public bool ConsumeRepoReordered()
+    {
+        var v = _repoReordered;
+        _repoReordered = false;
+        return v;
+    }
+
+    /// <summary>Conteúdo-fonte de um nível no swap: o working em memória se for ele, senão do disco.</summary>
+    private Level SwapSource(int id)
+        => _working != null && _working.Id == id ? _working : _repo.Load(id);
 
     // ----- Undo / redo -----
 

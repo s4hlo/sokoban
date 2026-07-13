@@ -80,6 +80,9 @@ public class Game1 : Game
         _editor = new LevelEditor(_levelManager, _levelRepo);
         // Redimensionar o grid no editor exige reenquadrar a câmera.
         _editor.GridChanged += ReframeCamera;
+        // Entrada de texto do SO (respeita layout/shift): alimenta o rename do editor. O editor
+        // ignora se não estiver renomeando.
+        Window.TextInput += (_, e) => { if (_editorActive) _editor.OnTextInput(e.Character); };
 
         // O solver-playback reusa o MESMO MovementSystem do jogo: a solução executa pelas
         // regras reais, sem segunda cópia pra divergir.
@@ -112,20 +115,40 @@ public class Game1 : Game
         var keyboard = Keyboard.GetState();
         var mouse = Mouse.GetState();
 
-        if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || keyboard.IsKeyDown(Keys.Escape))
+        // Esc nunca encerra o jogo: ele recua um nível de contexto (fecha a lista, senão sai do
+        // editor). Só o Back do gamepad (ou fechar a janela) encerra de fato.
+        if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed)
             Exit();
 
-        // Tab alterna entre jogar e editar a sessão ativa. Ao entrar, o editor recebe o teclado
-        // e o mouse atuais pra a detecção de borda não disparar uma brush no mesmo frame.
-        // Mutuamente exclusivo com o solver (P).
-        bool toggled = !_solverActive && Pressed(keyboard, Keys.Tab);
+        // Modal do editor aberto (rename/lista): Esc/Tab ficam com o editor (fecham o modal),
+        // não trocam de modo aqui.
+        bool editorModal = _editorActive && _editor.IsModal;
+
+        // Tab alterna jogar/editar; Esc (já no editor e fora de modal) volta a jogar. Esc nunca
+        // ENTRA no editor — só Tab. Mutuamente exclusivo com o solver (P).
+        bool escLeavesEditor = _editorActive && !editorModal && Pressed(keyboard, Keys.Escape);
+        bool toggled = !_solverActive && !editorModal && (Pressed(keyboard, Keys.Tab) || escLeavesEditor);
         if (toggled)
         {
             _editorActive = !_editorActive;
             if (_editorActive)
                 _editor.Enter(Active, keyboard, mouse, GraphicsDevice.Viewport);
             else
+            {
+                // Ao voltar a jogar: se houve reordenação de ids, o cache de sessões do navigator
+                // ficou obsoleto — grava o nível editado em disco (pra não perder edições no
+                // reset), reconstrói do disco e retoma nele.
+                var editedLevel = _editor.Working;
+                int editedId = editedLevel?.Id ?? LevelCatalog.RootId;
                 _editor.Exit(Active);
+                if (_editor.ConsumeRepoReordered())
+                {
+                    if (editedLevel != null)
+                        _levelRepo.Save(editedLevel);
+                    _navigator.Reload();
+                    _navigator.JumpTo(editedId);
+                }
+            }
         }
 
         if (_editorActive)
@@ -136,7 +159,28 @@ public class Game1 : Game
                 // O editor faz o próprio picking (raycast contra a cena); daqui vai só a câmera
                 // e o botão de brush do HUD sob o ponteiro (null se não estiver sobre nenhum).
                 var brushButton = _editorRenderer.HitTestBrush(mouse.X, mouse.Y);
-                _editor.Update(Active, keyboard, mouse, GraphicsDevice.Viewport, brushButton);
+                // Com a lista aberta, também resolve a linha sob o ponteiro (pra hover/clique).
+                int? levelRow = _editor.ShowLevelList ? _editorRenderer.HitTestLevelRow(mouse.X, mouse.Y) : null;
+                _editor.Update(Active, keyboard, mouse, GraphicsDevice.Viewport, brushButton, levelRow);
+
+                // Enter na lista pediu pra pular pra edição de outro nível: devolve as edições à
+                // sessão atual, troca a sessão ativa pelo navigator (pilha/identidade corretas) e
+                // reabre o editor na nova sessão. Assim testar e concluir a meta volta pro pai.
+                if (_editor.TakePendingJump() is int jumpId)
+                {
+                    // Reordenou antes de pular: grava o nível editado (pra não perder edições no
+                    // reset) e reconstrói o navigator do disco antes de saltar pro alvo.
+                    var editedLevel = _editor.Working;
+                    _editor.Exit(Active);
+                    if (_editor.ConsumeRepoReordered())
+                    {
+                        if (editedLevel != null)
+                            _levelRepo.Save(editedLevel);
+                        _navigator.Reload();
+                    }
+                    _navigator.JumpTo(jumpId);
+                    _editor.Enter(Active, keyboard, mouse, GraphicsDevice.Viewport);
+                }
             }
             _previousKeyboard = keyboard;
             base.Update(gameTime);
@@ -146,10 +190,11 @@ public class Game1 : Game
         // P alterna o solver-playback (dev tool). Ao entrar, o nível reseta pro estado de
         // receita (o solver resolve a partir do zero) e a solução executa sozinha.
         // C é o irmão do P: mesmo playback, mas tocando o CERTIFICADO gravado
-        // (Solutions/level_N.moves) em vez de buscar. Qualquer um dos dois sai do modo.
+        // (Solutions/level_N.moves) em vez de buscar. Qualquer um dos dois — ou Esc — sai do modo.
         bool searchKey = Pressed(keyboard, Keys.P);
         bool certificateKey = !searchKey && Pressed(keyboard, Keys.C);
-        if (searchKey || certificateKey)
+        bool escLeavesSolver = _solverActive && Pressed(keyboard, Keys.Escape);
+        if (searchKey || certificateKey || escLeavesSolver)
         {
             _solverActive = !_solverActive;
             if (_solverActive)
@@ -322,12 +367,16 @@ public class Game1 : Game
         base.Draw(gameTime);
     }
 
-    /// <summary>HUD do jogo: nível atual no canto superior esquerdo e o atalho de troca.</summary>
+    /// <summary>HUD do jogo: nível atual (id + nome) no canto superior esquerdo e o atalho de troca.</summary>
     private void DrawLevelHud()
     {
-        string label = Active.LevelId == LevelCatalog.RootId
+        string baseLabel = Active.LevelId == LevelCatalog.RootId
             ? "Nivel 0 (raiz)"
             : $"Nivel {Active.LevelId}";
+
+        // Nome do design (mesmo mostrado no editor), quando houver.
+        string name = Active.CurrentLevel?.Name;
+        string label = string.IsNullOrEmpty(name) ? baseLabel : $"{baseLabel} - {name}";
 
         _hudBatch.Begin();
         DrawShadowed(label, new Vector2(16, 12), Color.White);

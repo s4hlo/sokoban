@@ -104,6 +104,21 @@ public class LevelNavigator
     }
 
     /// <summary>
+    /// Descarta todas as sessões (estado de jogo) e recomeça da raiz, relendo as receitas do
+    /// disco. Usado quando o editor faz uma mudança estrutural no catálogo (reordenar ids):
+    /// o cache de sessões é por id, então trocar ids em disco o deixa apontando pra conteúdo
+    /// velho — sem este reset, navegar (portais / &lt; &gt;) pegaria o nível errado.
+    /// </summary>
+    public void Reload()
+    {
+        foreach (var session in _sessions.Values)
+            session.Dispose();
+        _sessions.Clear();
+        _stack.Clear();
+        EnterRoot();
+    }
+
+    /// <summary>
     /// Salta direto pro nível de id <paramref name="id"/> (atalho de navegação), preservando
     /// as sessões atuais no cache (como suspender). A pilha vira raiz → destino, então concluir
     /// o destino volta pra raiz — o salto é um desvio, não um novo ramo da árvore.
