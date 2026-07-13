@@ -64,8 +64,8 @@ public class Level
     // Bases atemporais: marcadores que não ocupam o grid e congelam o undo de quem está em cima.
     public List<(int X, int Y, int Z)> TimelessBaseSpawns = new();
 
-    // Trilhos: marcadores que não ocupam o grid e limitam as direções de SAÍDA da caixa em cima
-    // (a entrada é livre; o undo ignora). O tipo define as saídas (ver RailRules).
+    // Trilhos: marcadores que não ocupam o grid e só trocam caixa pelas PONTAS do tipo — sair
+    // e entrar, só por elas (o undo ignora). As pontas de cada tipo moram em RailRules.
     public List<(int X, int Y, int Z, RailType Type)> RailSpawns = new();
 
     // Caixas portal: pares ligados por Group. Quem tenta entrar numa é teleportado pro lado

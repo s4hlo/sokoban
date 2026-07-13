@@ -179,23 +179,23 @@ public struct Obstacle
 }
 
 /// <summary>
-/// Tipos de trilho: quais direções de SAÍDA a célula permite, no plano X/Z. Retos permitem as
-/// duas pontas do eixo; curvas ligam uma ponta X com uma ponta Z. As direções de cada tipo
-/// moram em <see cref="RailRules"/>.
+/// Tipos de trilho: quais PONTAS a célula tem, no plano X/Z. Retos ligam as duas pontas do
+/// eixo; curvas ligam uma ponta X com uma ponta Z. Carga só sai E só entra pelas pontas.
+/// As direções de cada tipo moram em <see cref="RailRules"/>.
 /// </summary>
 public enum RailType
 {
-    StraightX,    // reto no X: sai só em ±X
-    StraightZ,    // reto no Z: sai só em ±Z
-    BendPosXPosZ, // curva: sai em +X ou +Z
-    BendPosXNegZ, // curva: sai em +X ou -Z
-    BendNegXPosZ, // curva: sai em -X ou +Z
-    BendNegXNegZ, // curva: sai em -X ou -Z
+    StraightX,    // reto no X: pontas em ±X
+    StraightZ,    // reto no Z: pontas em ±Z
+    BendPosXPosZ, // curva: pontas em +X e +Z
+    BendPosXNegZ, // curva: pontas em +X e -Z
+    BendNegXPosZ, // curva: pontas em -X e +Z
+    BendNegXNegZ, // curva: pontas em -X e -Z
 }
 
 /// <summary>
-/// Trilho: marcador de célula (não ocupa o grid) que limita as direções de SAÍDA da caixa em
-/// cima dele. A entrada é livre por qualquer direção; sair, só pelas saídas do <see cref="Type"/>.
+/// Trilho: marcador de célula (não ocupa o grid) que só troca caixa pelas PONTAS do
+/// <see cref="Type"/> — sair, só nas direções das pontas; entrar, só chegando por uma delas.
 /// Só vale pro movimento de jogo (empurrão, corpo magnético) — o undo/restart reposiciona
 /// direto pelo History e ignora o trilho, e a queda é vertical. Ver <see cref="Core.Rails"/>.
 /// </summary>
@@ -205,8 +205,8 @@ public struct Rail
 }
 
 /// <summary>
-/// Direções de saída de cada tipo de trilho. Fonte única pra regra de movimento
-/// (<see cref="Core.Rails"/>) e pro desenho (um braço por saída) nunca divergirem.
+/// As pontas de cada tipo de trilho (saída E entrada de carga). Fonte única pra regra de
+/// movimento (<see cref="Core.Rails"/>) e pro desenho (um braço por ponta) nunca divergirem.
 /// </summary>
 public static class RailRules
 {

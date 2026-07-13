@@ -169,7 +169,7 @@ public class MovementSystem
         // Resolve onde o player de fato pára: a célula alvo pode estar livre, ser liberada por um
         // empurrão, ou (caixa portal) redirecionar pra outro lugar. null = jogada impossível, e
         // como o PushInto só muta em caminhos de sucesso, o snapshot é descartado intacto.
-        var playerTo = PushInto(targetX, pos.Y, targetZ, dx, dz, PlayerPushStrength, new HashSet<Entity>(), direct: true);
+        var playerTo = PushInto(targetX, pos.Y, targetZ, dx, dz, PlayerPushStrength, new HashSet<Entity>(), direct: true, cargo: false);
         if (playerTo is null)
         {
             Bail();
@@ -199,17 +199,23 @@ public class MovementSystem
         if (Stickiness.Holds(_world, player, dx, dz))
             return;
 
-        // Caixa do corpo retida por efeito de célula (ver Restraints): se ela está EXATAMENTE
-        // atrás do passo, o player está se afastando dela — o grude se rompe e a caixa sai do
-        // corpo, ficando pra trás (ela não ocupa a célula que o player libera; a adjacência
-        // derivada a solta sozinha, e um undo re-gruda do mesmo jeito). Retida em qualquer
-        // outro lado, o corpo é rígido: a translação inteira trava, antes de qualquer mutação.
+        // Caixa do corpo que não consegue dar o passo: se ela está EXATAMENTE atrás do
+        // movimento, o player está se afastando dela — o grude se rompe e a caixa sai do corpo,
+        // ficando pra trás (a adjacência derivada a solta sozinha, e um undo re-gruda do mesmo
+        // jeito). Pra ela, "não consegue" é retenção na própria célula (ver Restraints) ou
+        // trilho sob o player rejeitando a entrada dela na célula vacada — as duas únicas
+        // barreiras possíveis, já que o destino dela (a célula do player) sempre fica livre.
+        // Caixa retida em qualquer outro lado, o corpo é rígido: a translação inteira trava,
+        // antes de qualquer mutação.
         for (int i = magnets.Count - 1; i >= 0; i--)
         {
             var (box, ox, oz) = magnets[i];
-            if (!Restraints.Holds(_world, box, dx, dz))
+            bool trailing = ox == -dx && oz == -dz;
+            bool stuck = Restraints.Holds(_world, box, dx, dz)
+                || (trailing && Rails.RejectsEntry(_world, pos.X, pos.Y, pos.Z, dx, dz));
+            if (!stuck)
                 continue;
-            if (ox == -dx && oz == -dz)
+            if (trailing)
                 magnets.RemoveAt(i);
             else
                 return;
@@ -223,17 +229,17 @@ public class MovementSystem
         foreach (var (box, _, _) in magnets)
             _world.Vacate(box);
 
-        var pieces = new List<(Entity E, GridPosition To)>
+        var pieces = new List<(Entity E, GridPosition To, bool Cargo)>
         {
-            (player, new GridPosition(pos.X + dx, pos.Y, pos.Z + dz)),
+            (player, new GridPosition(pos.X + dx, pos.Y, pos.Z + dz), false),
         };
         foreach (var (box, ox, oz) in magnets)
-            pieces.Add((box, new GridPosition(pos.X + ox + dx, pos.Y, pos.Z + oz + dz)));
+            pieces.Add((box, new GridPosition(pos.X + ox + dx, pos.Y, pos.Z + oz + dz), true));
 
         bool ok = true;
-        foreach (var (_, to) in pieces)
+        foreach (var (_, to, isCargo) in pieces)
         {
-            var landing = PushInto(to.X, to.Y, to.Z, dx, dz, PlayerPushStrength, new HashSet<Entity>(), direct: true);
+            var landing = PushInto(to.X, to.Y, to.Z, dx, dz, PlayerPushStrength, new HashSet<Entity>(), direct: true, cargo: isCargo);
             if (landing is null || landing.Value.X != to.X || landing.Value.Y != to.Y || landing.Value.Z != to.Z)
             {
                 ok = false;
@@ -245,14 +251,14 @@ public class MovementSystem
         {
             // Corpo travado: todo mundo volta a ocupar onde estava. O que uma peça JÁ empurrou
             // antes do bloqueio fica empurrado — se algo mudou, ainda é um turno.
-            foreach (var (e, _) in pieces)
+            foreach (var (e, _, _) in pieces)
                 _world.Occupy(e);
             if (_pushMutated)
                 SettleAndCommit(player, before);
             return;
         }
 
-        foreach (var (e, to) in pieces)
+        foreach (var (e, to, _) in pieces)
         {
             _world.World.Set(e, to);
             _world.Occupy(e);
@@ -275,15 +281,21 @@ public class MovementSystem
         bool ccw = -f.Dz == dx && f.Dx == dz;
         (int X, int Z) Rot(int x, int z) => ccw ? (-z, x) : (z, -x);
 
-        // Giro retido: a caixa sai da célula na tangente (nx,nz) — qualquer retenção contra essa
-        // direção (ver Restraints) trava o giro inteiro, antes de qualquer mutação. O sticky
-        // ainda é conferido também contra (-ox,-oz): o deslocamento líquido da varredura (a
-        // diagonal do arco) se decompõe nas duas direções e o grude segura contra ambas. No giro
-        // não há desprendimento — o player não sai do lugar, então nunca "se afasta" da caixa.
+        // Giro retido, checado antes de qualquer mutação. Sticky: o deslocamento líquido da
+        // varredura (a diagonal do arco) se decompõe nas direções (nx,nz) e (-ox,-oz), e o grude
+        // segura contra qualquer uma das duas. Trilho: regra pura de FRONTEIRA — cada borda de
+        // célula que a varredura cruza precisa passar por uma ponta: sai da célula de origem na
+        // tangente (Restraints aqui), sai da diagonal em (-ox,-oz) (RejectsExit aqui; a ENTRADA
+        // na diagonal e no destino o PushInto confere). O giro reverso cruza as mesmas bordas
+        // pelas mesmas pontas, então pôr a caixa num trilho girando e tirar com o giro oposto é
+        // sempre simétrico. No giro não há desprendimento — o player não sai do lugar, então
+        // nunca "se afasta" da caixa.
         foreach (var (box, ox, oz) in magnets)
         {
             var (nx, nz) = Rot(ox, oz);
             if (Restraints.Holds(_world, box, nx, nz) || Stickiness.Holds(_world, box, -ox, -oz))
+                return;
+            if (Rails.RejectsExit(_world, pos.X + ox + nx, pos.Y, pos.Z + oz + nz, -ox, -oz))
                 return;
         }
 
@@ -306,14 +318,14 @@ public class MovementSystem
 
             // A diagonal é varrida na direção do giro; o destino, pra "trás" do offset antigo.
             // As duas células precisam FICAR livres (redirecionamento de portal não serve).
-            var atDiag = PushInto(diagX, pos.Y, diagZ, nx, nz, PlayerPushStrength, new HashSet<Entity>(), direct: true);
+            var atDiag = PushInto(diagX, pos.Y, diagZ, nx, nz, PlayerPushStrength, new HashSet<Entity>(), direct: true, cargo: true);
             if (atDiag is null || atDiag.Value.X != diagX || atDiag.Value.Y != pos.Y || atDiag.Value.Z != diagZ)
             {
                 ok = false;
                 break;
             }
 
-            var atDest = PushInto(destX, pos.Y, destZ, -ox, -oz, PlayerPushStrength, new HashSet<Entity>(), direct: true);
+            var atDest = PushInto(destX, pos.Y, destZ, -ox, -oz, PlayerPushStrength, new HashSet<Entity>(), direct: true, cargo: true);
             if (atDest is null || atDest.Value.X != destX || atDest.Value.Y != pos.Y || atDest.Value.Z != destZ)
             {
                 ok = false;
@@ -443,11 +455,21 @@ public class MovementSystem
     /// corpo rígido magnético) — a chamada recursiva de uma caixa empurrando a próxima é sempre
     /// indireta. Distingue as duas pra <see cref="BoxType.Collectible"/>: tocada direto, é
     /// destruída (coletada); empurrada em cadeia, anda como uma caixa leve comum.
+    /// <paramref name="cargo"/> é true quando quem quer a célula é uma CAIXA (empurrada em cadeia
+    /// ou peça do corpo magnético) e false quando é o próprio player — o trilho barra a entrada de
+    /// carga pelo lado errado, mas nunca barra o player.
     /// </summary>
-    private GridPosition? PushInto(int x, int y, int z, int dx, int dz, int budget, HashSet<Entity> visited, bool direct)
+    private GridPosition? PushInto(int x, int y, int z, int dx, int dz, int budget, HashSet<Entity> visited, bool direct, bool cargo)
     {
         if (!_world.Grid.IsValid(x, y, z))
             return null; // parede / fora do grid
+
+        // Carga só assenta num trilho chegando por uma das pontas (ver Rails.RejectsEntry).
+        // Checado aqui no topo, ANTES de qualquer concessão: vale pra célula livre, pra herdada
+        // de um empurrão e pra liberada por uma frágil/coletável. Uma frágil barrada aqui quebra
+        // como contra uma parede — bloqueio à frente, não retenção na própria célula.
+        if (cargo && Rails.RejectsEntry(_world, x, y, z, dx, dz))
+            return null;
 
         if (!_world.Grid.IsOccupied(x, y, z))
             return new GridPosition(x, y, z); // livre: entra direto
@@ -465,7 +487,7 @@ public class MovementSystem
             if (partner is not null)
             {
                 var b = _world.World.Get<GridPosition>(partner.Value);
-                var through = PushInto(b.X + dx, b.Y, b.Z + dz, dx, dz, budget, visited, direct);
+                var through = PushInto(b.X + dx, b.Y, b.Z + dz, dx, dz, budget, visited, direct, cargo);
                 if (through is not null)
                     return through; // atravessou: pára do lado oposto da parceira
             }
@@ -503,7 +525,7 @@ public class MovementSystem
         // orçamento 0 pra frente, então não empurra nada com peso. As com peso repassam a força
         // que sobra.
         int forwardBudget = weight == 0 ? 0 : budget - weight;
-        var boxLanding = PushInto(x + dx, y, z + dz, dx, dz, forwardBudget, visited, direct: false);
+        var boxLanding = PushInto(x + dx, y, z + dz, dx, dz, forwardBudget, visited, direct: false, cargo: true);
 
         if (boxLanding is not null)
         {
@@ -533,7 +555,9 @@ public class MovementSystem
     /// Empurra uma <see cref="BigBox"/> (duas células). Ao longo do próprio eixo ela desliza como
     /// uma caixa comum: só a célula além da borda dianteira (na direção do passo) precisa estar
     /// livre — a célula traseira ocupa a que a dianteira libera. Perpendicular ao eixo, as DUAS
-    /// células de destino (uma por célula do footprint) precisam estar livres; ao contrário de uma
+    /// células de destino (uma por célula do footprint) precisam estar livres. Toda célula nova
+    /// também precisa aceitar a entrada de carga (<see cref="Rails.RejectsEntry"/> — não passa
+    /// pelo PushInto, então a regra do trilho é conferida aqui). Ao contrário de uma
     /// caixa leve comum, ela não tenta empurrar o que encontrar nelas — trava em vez de encadear
     /// (simplificação deliberada; peso "de graça" mas sem transmitir empurrão). <paramref name="qx"/>
     /// etc. é a célula originalmente consultada por quem chamou <see cref="PushInto"/>, devolvida
@@ -556,15 +580,18 @@ public class MovementSystem
             int frontX = positive ? secondX : anchor.X;
             int frontZ = positive ? secondZ : anchor.Z;
 
-            if (_world.Grid.IsOccupied(frontX + dx, anchor.Y, frontZ + dz))
+            if (_world.Grid.IsOccupied(frontX + dx, anchor.Y, frontZ + dz)
+                || Rails.RejectsEntry(_world, frontX + dx, anchor.Y, frontZ + dz, dx, dz))
                 return null;
         }
         else
         {
             // Deslocamento lateral: as duas células novas nunca sobrepõem o footprint atual.
-            if (_world.Grid.IsOccupied(anchor.X + dx, anchor.Y, anchor.Z + dz))
+            if (_world.Grid.IsOccupied(anchor.X + dx, anchor.Y, anchor.Z + dz)
+                || Rails.RejectsEntry(_world, anchor.X + dx, anchor.Y, anchor.Z + dz, dx, dz))
                 return null;
-            if (_world.Grid.IsOccupied(secondX + dx, anchor.Y, secondZ + dz))
+            if (_world.Grid.IsOccupied(secondX + dx, anchor.Y, secondZ + dz)
+                || Rails.RejectsEntry(_world, secondX + dx, anchor.Y, secondZ + dz, dx, dz))
                 return null;
         }
 
