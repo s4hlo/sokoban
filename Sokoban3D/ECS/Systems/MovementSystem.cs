@@ -298,19 +298,21 @@ public class MovementSystem
         bool ccw = -f.Dz == dx && f.Dx == dz;
         (int X, int Z) Rot(int x, int z) => ccw ? (-z, x) : (z, -x);
 
-        // Giro retido, checado antes de qualquer mutação. Sticky: o deslocamento líquido da
-        // varredura (a diagonal do arco) se decompõe nas direções (nx,nz) e (-ox,-oz), e o grude
-        // segura contra qualquer uma das duas. Trilho: regra pura de FRONTEIRA — cada borda de
-        // célula que a varredura cruza precisa passar por uma ponta: sai da célula de origem na
-        // tangente (Restraints aqui), sai da diagonal em (-ox,-oz) (RejectsExit aqui; a ENTRADA
-        // na diagonal e no destino o PushInto confere). O giro reverso cruza as mesmas bordas
-        // pelas mesmas pontas, então pôr a caixa num trilho girando e tirar com o giro oposto é
-        // sempre simétrico. No giro não há desprendimento — o player não sai do lugar, então
-        // nunca "se afasta" da caixa.
+        // Giro retido, checado antes de qualquer mutação. Sticky NÃO segura a varredura: a regra
+        // dele barra só o passo de AFASTAMENTO direto, e o arco move a caixa na tangente — "de
+        // lado" em relação a qualquer sticky vizinho, direção que o grude deixa livre. Girar é,
+        // por design, o jeito de DESCOLAR uma magnética do sticky levando-a junto (a translação
+        // de afastamento continua sendo o jeito de soltá-la do CORPO, ver TryMoveBody). Trilho:
+        // regra pura de FRONTEIRA — cada borda de célula que a varredura cruza precisa passar
+        // por uma ponta: sai da célula de origem na tangente (Holds aqui), sai da diagonal em
+        // (-ox,-oz) (RejectsExit aqui; a ENTRADA na diagonal e no destino o PushInto confere).
+        // O giro reverso cruza as mesmas bordas pelas mesmas pontas, então pôr a caixa num
+        // trilho girando e tirar com o giro oposto é sempre simétrico. No giro não há
+        // desprendimento — o player não sai do lugar, então nunca "se afasta" da caixa.
         foreach (var (box, ox, oz) in magnets)
         {
             var (nx, nz) = Rot(ox, oz);
-            if (Restraints.Holds(_world, box, nx, nz) || Stickiness.Holds(_world, box, -ox, -oz))
+            if (Rails.Holds(_world, box, nx, nz))
                 return;
             if (Rails.RejectsExit(_world, pos.X + ox + nx, pos.Y, pos.Z + oz + nz, -ox, -oz))
                 return;
