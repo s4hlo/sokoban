@@ -12,7 +12,9 @@ namespace Sokoban3D.Core;
 /// reposiciona as peças e o grude se re-deriva sozinho (um undo que volta pra antes do encontro
 /// solta a caixa naturalmente). Enquanto houver caixa grudada, o player se move em modo tanque
 /// com ela como parte rígida do corpo (<see cref="ECS.Systems.MovementSystem"/>) e ela não cai
-/// (<see cref="Gravity"/> — o grude a segura pairando sobre buracos).
+/// (<see cref="Gravity"/> — o grude a segura pairando sobre buracos). A única forma de soltar:
+/// o player anda na direção OPOSTA à caixa enquanto algo a retém no lugar (<see cref="Restraints"/>
+/// — sticky, trilho...) — ela fica pra trás, a adjacência quebra e o grude se desfaz sozinho.
 /// </summary>
 public static class Magnetism
 {
