@@ -21,6 +21,10 @@ public class CubeRenderer
     private readonly VertexBuffer _wireVertices;
     private readonly IndexBuffer _wireIndices;
 
+    // Efeito de linhas com cor-por-vértice, pra geometria dinâmica montada a cada frame (a
+    // grade do plano de trabalho do editor). Sem buffer fixo: vai por DrawUserPrimitives.
+    private readonly BasicEffect _lineEffect;
+
     // Máscara de face: textura branca que só escurece as bordas. Modula o DiffuseColor — cada
     // cubo mantém a própria cor, mas com as arestas sombreadas pra ler melhor o volume.
     public CubeRenderer(GraphicsDevice device, Texture2D faceMask)
@@ -57,6 +61,13 @@ public class CubeRenderer
         _wireVertices.SetData(wverts);
         _wireIndices = new IndexBuffer(device, IndexElementSize.SixteenBits, winds.Length, BufferUsage.WriteOnly);
         _wireIndices.SetData(winds);
+
+        _lineEffect = new BasicEffect(device)
+        {
+            LightingEnabled = false,
+            TextureEnabled = false,
+            VertexColorEnabled = true,
+        };
     }
 
     /// <summary>
@@ -89,6 +100,18 @@ public class CubeRenderer
     }
 
     /// <summary>
+    /// Desenha um cubo semitransparente (fantasma) — o editor usa pra prever a peça que a brush
+    /// colocaria na célula do cursor. Reusa a geometria e o efeito do cubo cheio, só com o alfa
+    /// reduzido; o chamador cuida do BlendState/profundidade.
+    /// </summary>
+    public void DrawGhost(Vector3 position, Vector3 scale, Color color, float alpha, Matrix view, Matrix projection)
+    {
+        _effect.Alpha = alpha;
+        Draw(position, scale, color, view, projection);
+        _effect.Alpha = 1f; // restaura pra não vazar transparência pros cubos opacos da cena
+    }
+
+    /// <summary>
     /// Desenha apenas as arestas de um cubo (wireframe) na posição/escala dadas. Usado como
     /// cursor do editor. O chamador controla o estado de profundidade (o editor o desenha por
     /// cima da geometria pra ficar sempre visível).
@@ -107,6 +130,27 @@ public class CubeRenderer
         {
             pass.Apply();
             _device.DrawIndexedPrimitives(PrimitiveType.LineList, 0, 0, 12);
+        }
+    }
+
+    /// <summary>
+    /// Desenha uma lista de linhas 3D com cor por vértice (dois vértices por segmento). Geometria
+    /// dinâmica montada pelo chamador a cada frame — o editor usa pra a grade do plano de
+    /// trabalho. O estado de profundidade/blend fica por conta do chamador.
+    /// </summary>
+    public void DrawLines(VertexPositionColor[] lines, Matrix view, Matrix projection)
+    {
+        if (lines.Length < 2)
+            return;
+
+        _lineEffect.World = Matrix.Identity;
+        _lineEffect.View = view;
+        _lineEffect.Projection = projection;
+
+        foreach (var pass in _lineEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _device.DrawUserPrimitives(PrimitiveType.LineList, lines, 0, lines.Length / 2);
         }
     }
 

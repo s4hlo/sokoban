@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -8,8 +9,15 @@ using Serilog;
 using Sokoban3D.Core;
 using Sokoban3D.ECS.Components;
 using Sokoban3D.Levels;
+using Sokoban3D.Solver;
 
 namespace Sokoban3D.Editor;
+
+/// <summary>
+/// Veredito da checagem de solvabilidade do nível em edição (rodada pelo solver em segundo
+/// plano). <see cref="Idle"/> = ainda não checou desde a última edição.
+/// </summary>
+public enum EditorValidation { Idle, Running, Solvable, Unsolvable, Unknown, NoObjective }
 
 /// <summary>
 /// Editor de níveis in-game. Edita um <see cref="Level"/> (a receita, fonte de verdade do
@@ -20,8 +28,9 @@ namespace Sokoban3D.Editor;
 /// O mouse é a via principal: o picking acerta o bloco visível sob o ponteiro
 /// (<see cref="MousePicker.PickVoxel"/>) e o clique coloca na face apontada — esquerdo coloca
 /// (arrasto pinta na mesma camada), direito apaga, meio copia a brush do que está na célula,
-/// Ctrl+esquerdo move o conteúdo de uma célula, roda troca a camada Y. Toda mutação passa por
-/// snapshot pra Ctrl+Z/Ctrl+Y desfazer/refazer.
+/// Ctrl+esquerdo move o conteúdo de uma célula, roda troca a camada Y. Alt+arrasto orbita a
+/// câmera do editor e Alt+roda dá zoom (câmera própria, ver <see cref="EditorCamera"/>). Toda
+/// mutação passa por snapshot pra Ctrl+Z/Ctrl+Y desfazer/refazer.
 /// </summary>
 public class LevelEditor
 {
@@ -38,7 +47,14 @@ public class LevelEditor
     private KeyboardState _prev;
     private MouseState _prevMouse;
 
-    // Câmera/viewport do frame, pro picking do mouse (atualizados a cada Update).
+    // Câmera orbitável do editor (própria, não a fixa do jogo): o editor a controla e é a
+    // fonte das matrizes de view/projection usadas tanto no render quanto no picking.
+    private readonly EditorCamera _cam = new();
+    // Reenquadrar na próxima Update (quando já se tem a viewport): setado ao entrar e a cada
+    // mudança de dimensão do grid.
+    private bool _reframeCam;
+
+    // Viewport do frame, pro picking do mouse (atualizada a cada Update).
     private Viewport _viewport;
     private Matrix _view;
     private Matrix _projection;
@@ -56,6 +72,15 @@ public class LevelEditor
     // Mover (Ctrl+arrasto): conteúdo extraído da célula de origem, esperando o drop.
     private Level _grabbed;
     private (int X, int Y, int Z) _grabbedFrom;
+
+    // Checagem de solvabilidade em segundo plano: a busca (que pode levar segundos) roda num
+    // Task sobre um clone da receita, pra não travar o loop do jogo. O Update faz o polling.
+    private Task<SolveResult> _validationTask;
+
+    // Confirmação de duas etapas pras ações que descartam edições não salvas (novo/carregar):
+    // a primeira arma, a repetição confirma. Qualquer edição ou salvamento limpa (ver ConfirmDestructive).
+    private enum Confirm { None, New, Load }
+    private Confirm _pendingConfirm = Confirm.None;
 
     // ----- Estado exposto pro renderer -----
     public int CursorX { get; private set; }
@@ -81,6 +106,20 @@ public class LevelEditor
     public bool StatusIsWarning { get; private set; }
     /// <summary>True enquanto um Ctrl+arrasto carrega o conteúdo de uma célula.</summary>
     public bool IsMoving => _grabbed != null;
+    /// <summary>True enquanto Shift está pressionado (WASD/QE redimensionam o grid, não movem o cursor).</summary>
+    public bool IsResizing { get; private set; }
+    /// <summary>True quando a receita tem edições ainda não gravadas em disco (marcador no HUD).</summary>
+    public bool IsDirty { get; private set; }
+    /// <summary>Mostra a barra de atalhos completa (alterna com H) — desligada, só uma dica mínima.</summary>
+    public bool ShowHelp { get; private set; } = true;
+    /// <summary>Desenha a grade do plano de trabalho na camada Y ativa (alterna com G).</summary>
+    public bool ShowPlane { get; private set; } = true;
+    /// <summary>Último veredito de solvabilidade (tecla V). Zera pra Idle a cada edição.</summary>
+    public EditorValidation Validation { get; private set; } = EditorValidation.Idle;
+
+    // Matrizes da câmera do editor, consumidas pelo Game1 pra desenhar a cena enquanto edita.
+    public Matrix View => _cam.View;
+    public Matrix Projection => _cam.Projection;
 
     /// <summary>Disparado quando as dimensões do grid mudam (a câmera precisa reenquadrar).</summary>
     public event Action GridChanged;
@@ -96,25 +135,34 @@ public class LevelEditor
     /// (o editor mostra o design, não o estado de jogo). Recebe o teclado atual pra a detecção
     /// de borda não disparar a brush no mesmo frame do Tab.
     /// </summary>
-    public void Enter(GameWorld session, KeyboardState keyboard, MouseState mouse)
+    public void Enter(GameWorld session, KeyboardState keyboard, MouseState mouse, Viewport viewport)
     {
         _session = session;
         _working = session.CurrentLevel?.Clone() ?? BlankLevel(-1);
         _prev = keyboard;
         _prevMouse = mouse;
+        _viewport = viewport;
 
         _undoStack.Clear();
         _redoStack.Clear();
         _dragY = null;
         _grabbed = null;
+        IsDirty = false;
+        Validation = EditorValidation.Idle;
+        _validationTask = null;
+        _pendingConfirm = Confirm.None;
 
         CursorX = _working.Width / 2;
         CursorZ = _working.Depth / 2;
         CursorY = Math.Min(1, _working.Height - 1);
         SetStatus($"Editando \"{_working.Name}\"");
 
+        // Enquadra a câmera do editor já aqui pra o primeiro frame (antes da primeira Update) não
+        // desenhar com matriz zerada; resizes posteriores reenquadram via RaiseGridChanged.
+        _cam.Frame(_working.Width, _working.Depth, viewport.AspectRatio);
+        _reframeCam = false;
         Rebuild();
-        GridChanged?.Invoke();
+        GridChanged?.Invoke(); // reenquadra a câmera fixa do jogo (pra quando sair do editor)
     }
 
     /// <summary>
@@ -137,31 +185,65 @@ public class LevelEditor
     }
 
     public void Update(GameWorld session, KeyboardState keyboard, MouseState mouse,
-        Viewport viewport, Matrix view, Matrix projection, PaletteItem? hudBrush)
+        Viewport viewport, PaletteItem? hudBrush)
     {
         _session = session;
         _viewport = viewport;
-        _view = view;
-        _projection = projection;
+
+        // Reenquadra a câmera do editor quando pendente (agora que a viewport é conhecida), e
+        // publica as matrizes correntes pro picking do mouse deste frame.
+        if (_reframeCam)
+        {
+            _cam.Frame(_working.Width, _working.Depth, viewport.AspectRatio);
+            _reframeCam = false;
+        }
+        _view = _cam.View;
+        _projection = _cam.Projection;
 
         bool shift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
         bool ctrl = keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
+        bool alt = keyboard.IsKeyDown(Keys.LeftAlt) || keyboard.IsKeyDown(Keys.RightAlt);
+        IsResizing = shift && !ctrl && !alt;
 
+        PollValidation();
+        HandleCameraKeys(keyboard);
+
+        // Alt é o modo câmera (órbita/zoom): não move cursor, não redimensiona, não coloca.
         if (ctrl)
             HandleShortcuts(keyboard);
         else if (shift)
             HandleResize(keyboard);
-        else
+        else if (!alt)
             HandleCursor(keyboard);
 
+        HandleViewKeys(keyboard, ctrl);
         HandleBrushSelection(keyboard);
-        if (!ctrl)
+        if (!ctrl && !alt)
             HandlePlacement(keyboard);
-        HandleMouse(mouse, hudBrush, ctrl);
-        HandleFiles(keyboard);
+        HandleMouse(mouse, hudBrush, ctrl, alt);
 
         _prev = keyboard;
         _prevMouse = mouse;
+    }
+
+    /// <summary>Zoom da câmera por teclado (+/−); a órbita e o zoom fino ficam no mouse (Alt).</summary>
+    private void HandleCameraKeys(KeyboardState k)
+    {
+        if (Pressed(k, Keys.OemPlus)) _cam.Zoom(+1);
+        if (Pressed(k, Keys.OemMinus)) _cam.Zoom(-1);
+    }
+
+    // ----- Teclas de visão / ferramentas (sem modificador) -----
+
+    /// <summary>H alterna a ajuda, G a grade do plano, V dispara a checagem de solvabilidade.
+    /// Ignoradas com Ctrl pra não colidir com os atalhos (Ctrl+... nunca é uma dessas).</summary>
+    private void HandleViewKeys(KeyboardState k, bool ctrl)
+    {
+        if (ctrl)
+            return;
+        if (Pressed(k, Keys.H)) ShowHelp = !ShowHelp;
+        if (Pressed(k, Keys.G)) ShowPlane = !ShowPlane;
+        if (Pressed(k, Keys.V)) Validate();
     }
 
     // ----- Atalhos com Ctrl -----
@@ -171,17 +253,51 @@ public class LevelEditor
         if (Pressed(k, Keys.Z)) Undo();
         if (Pressed(k, Keys.Y)) Redo();
         if (Pressed(k, Keys.S)) SaveToDisk();
+        if (Pressed(k, Keys.O)) LoadFromDisk();
+        if (Pressed(k, Keys.N)) NewBlank();
+        if (Pressed(k, Keys.D)) Duplicate();
     }
 
     // ----- Undo / redo -----
 
-    /// <summary>Tira um snapshot da receita ANTES de uma mutação, pra o Ctrl+Z voltar a ela.</summary>
+    /// <summary>
+    /// Tira um snapshot da receita ANTES de uma mutação, pra o Ctrl+Z voltar a ela. É o ponto
+    /// único por onde toda edição passa, então também marca a receita como "não salva" e invalida
+    /// o último veredito de solvabilidade (que passa a ser sobre um design que já mudou).
+    /// </summary>
     private void PushUndo()
     {
         _undoStack.Add(_working.Clone());
         if (_undoStack.Count > MaxUndo)
             _undoStack.RemoveAt(0);
         _redoStack.Clear();
+        MarkChanged();
+    }
+
+    /// <summary>Marca a receita como divergente do disco e descarta o veredito de solvabilidade.</summary>
+    private void MarkChanged()
+    {
+        IsDirty = true;
+        _pendingConfirm = Confirm.None; // uma edição invalida qualquer "repita pra confirmar" pendente
+        if (Validation != EditorValidation.Running)
+            Validation = EditorValidation.Idle;
+    }
+
+    /// <summary>
+    /// Portão de segurança das ações que jogam fora edições não salvas (novo/carregar): sem nada
+    /// pendente libera direto; com alterações, arma um pedido e só libera se a MESMA ação for
+    /// repetida antes de qualquer edição ou salvamento (que limpam o pedido). True = pode seguir.
+    /// </summary>
+    private bool ConfirmDestructive(Confirm action, string warning)
+    {
+        if (!IsDirty || _pendingConfirm == action)
+        {
+            _pendingConfirm = Confirm.None;
+            return true;
+        }
+        _pendingConfirm = action;
+        SetStatus($"{warning} — repita pra confirmar", warning: true);
+        return false;
     }
 
     private void Undo()
@@ -213,9 +329,10 @@ public class LevelEditor
         // Um move em andamento fica órfão: o snapshot restaurado já contém o item na origem.
         _grabbed = null;
         _dragY = null;
+        MarkChanged(); // o design mudou de novo — veredito de solvabilidade fica obsoleto
         ClampCursor();
         Rebuild();
-        GridChanged?.Invoke(); // as dimensões podem ter mudado junto
+        RaiseGridChanged(); // as dimensões podem ter mudado junto
         SetStatus(what);
     }
 
@@ -234,11 +351,20 @@ public class LevelEditor
     /// apaga o que está sob o ponteiro; meio copia a brush (conta-gotas); Ctrl+esquerdo pega o
     /// conteúdo da célula e solta onde o botão for liberado.
     /// </summary>
-    private void HandleMouse(MouseState mouse, PaletteItem? hudBrush, bool ctrl)
+    private void HandleMouse(MouseState mouse, PaletteItem? hudBrush, bool ctrl, bool alt)
     {
-        HandleWheel(mouse, ctrl);
+        HandleWheel(mouse, ctrl, alt);
 
         bool mouseMoved = mouse.X != _prevMouse.X || mouse.Y != _prevMouse.Y;
+
+        // Modo câmera: Alt+arrasto (botão esquerdo) orbita. Não toca no grid — sai antes de
+        // qualquer interação de brush/hover.
+        if (alt)
+        {
+            if (mouse.LeftButton == ButtonState.Pressed && mouseMoved)
+                _cam.Orbit(mouse.X - _prevMouse.X, mouse.Y - _prevMouse.Y);
+            return;
+        }
 
         // Um gesto em andamento (move/arrasto) tem prioridade sobre o HUD: soltar o botão em
         // cima de um rótulo ainda encerra o gesto em vez de deixá-lo pendurado.
@@ -333,14 +459,18 @@ public class LevelEditor
         }
     }
 
-    /// <summary>Roda do mouse: troca a camada Y do cursor; com Ctrl, ajusta o valor ([ ]).</summary>
-    private void HandleWheel(MouseState mouse, bool ctrl)
+    /// <summary>Roda do mouse: Alt aproxima/afasta (zoom); Ctrl ajusta o valor ([ ]); solta, troca a camada Y.</summary>
+    private void HandleWheel(MouseState mouse, bool ctrl, bool alt)
     {
         int ticks = (mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue) / 120;
         if (ticks == 0)
             return;
 
-        if (ctrl)
+        if (alt)
+        {
+            _cam.Zoom(ticks);
+        }
+        else if (ctrl)
         {
             AdjustAtCursor(ticks);
         }
@@ -598,7 +728,8 @@ public class LevelEditor
 
     private void HandleCursor(KeyboardState k)
     {
-        // Mesmo esquema do movimento no jogo: A/D = X, W/S = Z, Q/E = altura (Y).
+        // Cursor no plano do chão com WASD (A/D = X, W/S = Z) e altura com Q/E — convenção de
+        // editor de voxel. (O jogo usa W/S pra altura; aqui o mouse é a via principal.)
         if (Pressed(k, Keys.A)) CursorX--;
         if (Pressed(k, Keys.D)) CursorX++;
         if (Pressed(k, Keys.W)) CursorZ--;
@@ -935,7 +1066,7 @@ public class LevelEditor
             ClampCursor();
             Rebuild();
             SetStatus($"Grid {_working.Width}x{_working.Height}x{_working.Depth}");
-            GridChanged?.Invoke();
+            RaiseGridChanged();
         }
     }
 
@@ -979,13 +1110,88 @@ public class LevelEditor
     private bool InBounds(int x, int y, int z)
         => x >= 0 && x < _working.Width && y >= 0 && y < _working.Height && z >= 0 && z < _working.Depth;
 
+    // ----- Validação (solvabilidade) -----
+
+    /// <summary>
+    /// Dispara a checagem de solvabilidade em segundo plano sobre um clone da receita atual (o
+    /// solver pode levar segundos; um clone deixa o editor seguir editável sem corrida). Enquanto
+    /// uma checagem roda, uma nova tecla V é ignorada.
+    /// </summary>
+    private void Validate()
+    {
+        if (Validation == EditorValidation.Running)
+            return;
+
+        var snapshot = _working.Clone();
+        Validation = EditorValidation.Running;
+        SetStatus("Validando solvabilidade...");
+        _validationTask = Task.Run(() => PuzzleSolver.Solve(snapshot));
+    }
+
+    /// <summary>Colhe o resultado da checagem quando o Task termina e traduz pro veredito do HUD.</summary>
+    private void PollValidation()
+    {
+        if (_validationTask is null || !_validationTask.IsCompleted)
+            return;
+
+        var task = _validationTask;
+        _validationTask = null;
+
+        // Falha da busca (bug do solver, não do design): não derruba o editor.
+        if (task.IsFaulted)
+        {
+            Validation = EditorValidation.Unknown;
+            SetStatus("Validacao falhou (ver log)", warning: true);
+            Log.Warning(task.Exception, "Editor: checagem de solvabilidade falhou");
+            return;
+        }
+
+        var result = task.Result;
+
+        if (result.NoObjective)
+        {
+            Validation = EditorValidation.NoObjective;
+            SetStatus("Sem meta: nao ha o que resolver", warning: true);
+        }
+        else if (result.Solvable)
+        {
+            Validation = EditorValidation.Solvable;
+            SetStatus($"Resolvivel ({result.NodesExplored} nos, {result.Elapsed.TotalSeconds:0.0}s)");
+        }
+        else if (result.LimitHit)
+        {
+            Validation = EditorValidation.Unknown;
+            SetStatus("Inconclusivo: busca estourou o limite", warning: true);
+        }
+        else
+        {
+            Validation = EditorValidation.Unsolvable;
+            SetStatus("Sem solucao: o nivel nao tem como ser vencido", warning: true);
+        }
+    }
+
     // ----- Arquivos -----
 
-    private void HandleFiles(KeyboardState k)
+    /// <summary>
+    /// Duplica a receita atual num id novo (o próximo livre) e passa a editar a cópia — o jeito
+    /// de partir de um nível pronto e criar uma variação sem tocar no original em disco. Reusa o
+    /// <see cref="SaveToDisk"/> (grava no novo id, cria alvos de portal faltantes, zera o dirty);
+    /// o snapshot de undo deixa o Ctrl+Z voltar a editar o original.
+    /// </summary>
+    private void Duplicate()
     {
-        if (Pressed(k, Keys.F5)) SaveToDisk();
-        if (Pressed(k, Keys.F9)) LoadFromDisk();
-        if (Pressed(k, Keys.N)) NewBlank();
+        PushUndo();
+        _working.Id = NextFreeId();
+        SaveToDisk();
+        SetStatus($"Duplicado como nivel {_working.Id} — editando a copia");
+        Log.Information("Editor: nivel duplicado para {Id}", _working.Id);
+    }
+
+    /// <summary>Menor id ainda não usado no repositório (acima do maior existente e do id atual).</summary>
+    private int NextFreeId()
+    {
+        int max = _repo.ListIds().DefaultIfEmpty(-1).Max();
+        return Math.Max(max, _working.Id) + 1;
     }
 
     private void SaveToDisk()
@@ -998,6 +1204,8 @@ public class LevelEditor
         // pra o portal não levar a um arquivo inexistente (BuildLevel falharia ao entrar).
         int created = CreateMissingPortalTargets();
 
+        IsDirty = false;
+        _pendingConfirm = Confirm.None;
         SetStatus(created > 0
             ? $"Salvo: {path} (+{created} mapa(s) novo(s))"
             : $"Salvo: {path}");
@@ -1030,18 +1238,24 @@ public class LevelEditor
             SetStatus($"Sem arquivo: {_repo.PathFor(_working.Id)}", warning: true);
             return;
         }
+        if (!ConfirmDestructive(Confirm.Load, "Carregar do disco descarta as alteracoes"))
+            return;
 
         PushUndo();
         _working = _repo.Load(_working.Id);
+        IsDirty = false; // recém-carregado do disco: idêntico ao arquivo
         ClampCursor();
         Rebuild();
         SetStatus($"Carregado: {_repo.PathFor(_working.Id)}");
-        GridChanged?.Invoke();
+        RaiseGridChanged();
         Log.Information("Editor: nivel carregado de {Path}", _repo.PathFor(_working.Id));
     }
 
     private void NewBlank()
     {
+        if (!ConfirmDestructive(Confirm.New, "Novo em branco descarta as alteracoes"))
+            return;
+
         PushUndo();
         int id = _working.Id;
         _working = BlankLevel(id);
@@ -1050,7 +1264,7 @@ public class LevelEditor
         CursorY = 1;
         Rebuild();
         SetStatus("Novo nivel em branco");
-        GridChanged?.Invoke();
+        RaiseGridChanged();
     }
 
     private static Level BlankLevel(int id)
@@ -1068,6 +1282,16 @@ public class LevelEditor
     }
 
     private void Rebuild() => _levels.LoadLevel(_session, _working);
+
+    /// <summary>
+    /// As dimensões do grid mudaram: reenquadra a câmera do editor (no próximo Update, quando a
+    /// viewport estiver disponível) e avisa o Game1 pra reenquadrar a câmera do jogo também.
+    /// </summary>
+    private void RaiseGridChanged()
+    {
+        _reframeCam = true;
+        GridChanged?.Invoke();
+    }
 
     private bool Pressed(KeyboardState current, Keys key)
         => current.IsKeyDown(key) && _prev.IsKeyUp(key);

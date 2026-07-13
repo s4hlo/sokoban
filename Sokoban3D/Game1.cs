@@ -123,7 +123,7 @@ public class Game1 : Game
         {
             _editorActive = !_editorActive;
             if (_editorActive)
-                _editor.Enter(Active, keyboard, mouse);
+                _editor.Enter(Active, keyboard, mouse, GraphicsDevice.Viewport);
             else
                 _editor.Exit(Active);
         }
@@ -136,8 +136,7 @@ public class Game1 : Game
                 // O editor faz o próprio picking (raycast contra a cena); daqui vai só a câmera
                 // e o botão de brush do HUD sob o ponteiro (null se não estiver sobre nenhum).
                 var brushButton = _editorRenderer.HitTestBrush(mouse.X, mouse.Y);
-                _editor.Update(Active, keyboard, mouse,
-                    GraphicsDevice.Viewport, _camera.View, _camera.Projection, brushButton);
+                _editor.Update(Active, keyboard, mouse, GraphicsDevice.Viewport, brushButton);
             }
             _previousKeyboard = keyboard;
             base.Update(gameTime);
@@ -305,11 +304,14 @@ public class Game1 : Game
         // CubeRenderer.BuildCube, então só as faces externas são desenhadas.
         GraphicsDevice.RasterizerState = RasterizerState.CullCounterClockwise;
 
-        _renderSystem.Draw(Active, _camera.View, _camera.Projection);
+        // No editor a cena usa a câmera orbitável do próprio editor; fora dele, a câmera fixa.
+        Matrix view = _editorActive ? _editor.View : _camera.View;
+        Matrix projection = _editorActive ? _editor.Projection : _camera.Projection;
+        _renderSystem.Draw(Active, view, projection);
 
         // Overlay do editor (cursor + HUD) por cima da cena.
         if (_editorActive)
-            _editorRenderer.Draw(Active, _editor, _camera.View, _camera.Projection);
+            _editorRenderer.Draw(Active, _editor, view, projection);
         else
             DrawLevelHud();
 

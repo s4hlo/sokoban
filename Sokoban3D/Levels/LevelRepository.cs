@@ -6,7 +6,7 @@ namespace Sokoban3D.Levels;
 /// <summary>
 /// Guarda os níveis como arquivos JSON num diretório (<c>Levels/</c>). É a fonte de verdade
 /// dos mapas: o <see cref="LevelCatalog"/> lê daqui e o editor grava aqui — então editar e
-/// salvar (F5) altera o mapa oficial de vez. O diretório é resolvido relativo ao diretório de
+/// salvar (Ctrl+S) altera o mapa oficial de vez. O diretório é resolvido relativo ao diretório de
 /// trabalho atual (onde o jogo roda).
 /// </summary>
 public class LevelRepository

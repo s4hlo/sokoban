@@ -96,9 +96,122 @@ public class EditorRenderer
 
     public void Draw(GameWorld session, LevelEditor editor, Matrix view, Matrix projection)
     {
+        if (editor.ShowPlane)
+            DrawBuildPlane(session, editor, view, projection);
+        DrawGhost(session, editor, view, projection);
         DrawCursor(session, editor, view, projection);
         DrawLabels(session, view, projection);
         DrawHud(editor);
+    }
+
+    private const float GhostAlpha = 0.4f;
+
+    /// <summary>
+    /// Fantasma da peça que a brush colocaria na célula do cursor: um volume semitransparente na
+    /// cor/forma aproximada da peça (cubo pros sólidos, tile plano pros marcadores, duas células
+    /// pra caixa grande). Deixa claro O QUÊ e ONDE vai cair antes de confirmar — o cursor
+    /// wireframe segue por cima. Ocluído por blocos à frente (DepthRead), como parte da cena.
+    /// </summary>
+    private void DrawGhost(GameWorld session, LevelEditor editor, Matrix view, Matrix projection)
+    {
+        // Borracha não coloca nada; durante um move o cursor já É a peça carregada.
+        if (editor.Brush == EditorBrush.Eraser || editor.IsMoving)
+            return;
+
+        var grid = session.Grid;
+        var color = ActiveColor(editor);
+
+        _device.DepthStencilState = DepthStencilState.DepthRead;
+        _device.RasterizerState = RasterizerState.CullCounterClockwise;
+        _device.BlendState = BlendState.AlphaBlend;
+
+        if (IsMarkerBrush(editor.Brush))
+        {
+            var pos = GridView.ToWorld(grid, editor.CursorX, editor.CursorY, editor.CursorZ, GridView.MarkerRise);
+            _cubes.DrawGhost(pos, new Vector3(0.9f, 0.12f, 0.9f), color, GhostAlpha, view, projection);
+            return;
+        }
+
+        // Sólidos: obstáculo é cubo cheio; as peças (caixa/player/toggle...) são um pouco menores.
+        float rise = editor.Brush == EditorBrush.Obstacle ? GridView.ObstacleRise : GridView.PieceRise;
+        float scale = editor.Brush == EditorBrush.Obstacle ? 1f : 0.8f;
+        GhostSolid(grid, editor.CursorX, editor.CursorY, editor.CursorZ, rise, scale, color, view, projection);
+
+        // Caixa grande ocupa duas células: prevê a segunda também, quando cabe no grid.
+        if (editor.Brush == EditorBrush.BigBox)
+        {
+            var (ox, oz) = editor.BigBoxAxis == BigBoxAxis.X ? (1, 0) : (0, 1);
+            int bx = editor.CursorX + ox, bz = editor.CursorZ + oz;
+            if (bx >= 0 && bx < grid.Width && bz >= 0 && bz < grid.Depth)
+                GhostSolid(grid, bx, editor.CursorY, bz, GridView.PieceRise, 0.8f, color, view, projection);
+        }
+    }
+
+    private void GhostSolid(Sokoban3D.Grid.GridManager grid, int x, int y, int z, float rise, float scale,
+        Color color, Matrix view, Matrix projection)
+    {
+        var pos = GridView.ToWorld(grid, x, y, z, rise);
+        _cubes.DrawGhost(pos, new Vector3(scale), color, GhostAlpha, view, projection);
+    }
+
+    /// <summary>True pras brushes que viram marcadores planos (não ocupam o grid): meta, portal, placa, base, trilho.</summary>
+    private static bool IsMarkerBrush(EditorBrush brush) => brush switch
+    {
+        EditorBrush.Objective or EditorBrush.Portal or EditorBrush.Plate
+            or EditorBrush.TimelessBase or EditorBrush.Rail => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Grade do "plano de trabalho" na camada Y ativa: uma malha translúcida cobrindo o grid na
+    /// altura do cursor, com a borda em destaque e as duas linhas que cruzam o cursor pintadas na
+    /// cor da brush. É o que dá referência pra construir no ar — sempre há uma superfície visível
+    /// pra mirar e fica claro em que altura se está editando (convenção de editor de voxel).
+    /// </summary>
+    private void DrawBuildPlane(GameWorld session, LevelEditor editor, Matrix view, Matrix projection)
+    {
+        var grid = session.Grid;
+        int w = grid.Width, d = grid.Depth;
+        float y = editor.CursorY; // piso da camada: onde uma peça colocada ali repousa
+        float x0 = -w / 2f, x1 = w / 2f;
+        float z0 = -d / 2f, z1 = d / 2f;
+
+        var interior = Color.White * 0.10f;
+        var border = Color.White * 0.28f;
+        var cross = ActiveColor(editor) * 0.7f;
+
+        var lines = new List<VertexPositionColor>((w + d + 4) * 2);
+
+        // Fronteiras em X (linhas correndo em Z) e em Z (linhas correndo em X); pontas em destaque.
+        for (int i = 0; i <= w; i++)
+        {
+            float x = i - w / 2f;
+            var c = (i == 0 || i == w) ? border : interior;
+            lines.Add(new VertexPositionColor(new Vector3(x, y, z0), c));
+            lines.Add(new VertexPositionColor(new Vector3(x, y, z1), c));
+        }
+        for (int j = 0; j <= d; j++)
+        {
+            float z = j - d / 2f;
+            var c = (j == 0 || j == d) ? border : interior;
+            lines.Add(new VertexPositionColor(new Vector3(x0, y, z), c));
+            lines.Add(new VertexPositionColor(new Vector3(x1, y, z), c));
+        }
+
+        // Cruz do cursor: passa pelo CENTRO da célula (meia-célula fora das fronteiras da grade).
+        float cx = editor.CursorX - (w - 1) / 2f;
+        float cz = editor.CursorZ - (d - 1) / 2f;
+        lines.Add(new VertexPositionColor(new Vector3(cx, y, z0), cross));
+        lines.Add(new VertexPositionColor(new Vector3(cx, y, z1), cross));
+        lines.Add(new VertexPositionColor(new Vector3(x0, y, cz), cross));
+        lines.Add(new VertexPositionColor(new Vector3(x1, y, cz), cross));
+
+        // Lê a profundidade (a grade some atrás de blocos) mas não a grava, pra não atrapalhar o
+        // que vier depois. O cursor é desenhado em seguida por cima de tudo.
+        _device.DepthStencilState = DepthStencilState.DepthRead;
+        _device.RasterizerState = RasterizerState.CullNone;
+        _device.BlendState = BlendState.AlphaBlend;
+        _cubes.DrawLines(lines.ToArray(), view, projection);
     }
 
     /// <summary>
@@ -169,7 +282,7 @@ public class EditorRenderer
         _spriteBatch.Begin();
         float bottom = DrawInfoPanel(editor);
         DrawPalettePanel(editor, bottom + Pad);
-        DrawControlsBar();
+        DrawControlsBar(editor);
         _spriteBatch.End();
     }
 
@@ -182,38 +295,81 @@ public class EditorRenderer
     {
         float lh = _font.LineSpacing;
 
-        var title = new (string, Color)[]
+        // Painel de altura variável: monta as linhas e depois dimensiona pelo maior — assim
+        // banner de resize, stats e status entram/saem sem recalcular tamanhos à mão.
+        var lines = new List<(string, Color)[]>
         {
-            ("EDITOR", HeaderColor),
-            ($"  {editor.Working.Name}", TextColor),
-            ("   [Tab] jogar", HintColor),
+            new[]
+            {
+                ("EDITOR", HeaderColor),
+                (editor.IsDirty ? " *" : "", WarnColor), // asterisco: edições não salvas
+                ($"  {editor.Working.Name}", TextColor),
+                ($"  #{editor.Working.Id}", HintColor), // id do nível (arquivo/portais/navegação)
+                ("   [Tab] jogar", HintColor),
+            },
+            new[]
+            {
+                ($"Grid {editor.Working.Width}x{editor.Working.Height}x{editor.Working.Depth}   ", TextColor),
+                ($"X {editor.CursorX}  ", AxisXColor),
+                ($"Y {editor.CursorY}  ", AxisYColor),
+                ($"Z {editor.CursorZ}", AxisZColor),
+                ("   [roda] camada Y", HintColor),
+            },
+            StatsSegments(editor),
         };
-        var info = new (string, Color)[]
-        {
-            ($"Grid {editor.Working.Width}x{editor.Working.Height}x{editor.Working.Depth}   ", TextColor),
-            ($"X {editor.CursorX}  ", AxisXColor),
-            ($"Y {editor.CursorY}  ", AxisYColor),
-            ($"Z {editor.CursorZ}", AxisZColor),
-            ("   [roda] camada Y", HintColor),
-        };
-        bool hasStatus = !string.IsNullOrEmpty(editor.Status);
 
-        float width = Math.Max(MeasureSegments(title), MeasureSegments(info));
-        if (hasStatus)
-            width = Math.Max(width, _font.MeasureString(editor.Status).X);
+        if (editor.IsResizing)
+            lines.Add(new[] { ("REDIMENSIONANDO  ", WarnColor), ("Shift+WASD/QE ajusta o grid", HintColor) });
 
-        int lines = hasStatus ? 3 : 2;
-        var panel = new Rectangle(Pad, Pad, (int)width + Pad * 2, (int)(lines * lh) + Pad * 2);
+        if (!string.IsNullOrEmpty(editor.Status))
+            lines.Add(new[] { (editor.Status, editor.StatusIsWarning ? WarnColor : OkColor) });
+
+        float width = 0;
+        foreach (var line in lines)
+            width = Math.Max(width, MeasureSegments(line));
+
+        var panel = new Rectangle(Pad, Pad, (int)width + Pad * 2, (int)(lines.Count * lh) + Pad * 2);
         Fill(panel, PanelBg);
 
         float x = panel.X + Pad, y = panel.Y + Pad;
-        Line(x, ref y, lh, title);
-        Line(x, ref y, lh, info);
-        if (hasStatus)
-            Line(x, ref y, lh, (editor.Status, editor.StatusIsWarning ? WarnColor : OkColor));
+        foreach (var line in lines)
+            Line(x, ref y, lh, line);
 
         return panel.Bottom;
     }
+
+    /// <summary>
+    /// Linha de saúde do nível: player presente (1 exato), nº de metas, nº de caixas e o badge
+    /// persistente da última validação (tecla V) — feedback constante de que o design é
+    /// bem-formado, sem depender do status transitório.
+    /// </summary>
+    private static (string, Color)[] StatsSegments(LevelEditor editor)
+    {
+        var lvl = editor.Working;
+        int players = lvl.PlayerSpawns.Count;
+        int metas = lvl.ObjectiveSpawns.Count;
+        int caixas = lvl.BoxSpawns.Count + lvl.PortalBoxSpawns.Count + lvl.BigBoxSpawns.Count;
+        var (badge, badgeColor) = ValidationBadge(editor.Validation);
+
+        return new (string, Color)[]
+        {
+            ("Player ", TextColor), (players == 1 ? "ok" : players.ToString(), players == 1 ? OkColor : WarnColor),
+            ("  Metas ", TextColor), (metas.ToString(), metas > 0 ? TextColor : WarnColor),
+            ("  Caixas ", TextColor), (caixas.ToString(), TextColor),
+            ("   ", TextColor), (badge, badgeColor),
+        };
+    }
+
+    /// <summary>Texto+cor do badge de solvabilidade pro estado atual da validação.</summary>
+    private static (string Text, Color Color) ValidationBadge(EditorValidation v) => v switch
+    {
+        EditorValidation.Running => ("[V] validando...", HeaderColor),
+        EditorValidation.Solvable => ("resolvivel", OkColor),
+        EditorValidation.Unsolvable => ("sem solucao", WarnColor),
+        EditorValidation.Unknown => ("inconclusivo", WarnColor),
+        EditorValidation.NoObjective => ("sem meta", WarnColor),
+        _ => ("[V] validar", HintColor),
+    };
 
     /// <summary>
     /// Paleta vertical de brushes: cada linha tem o swatch de cor, a tecla e o nome; a ativa
@@ -293,12 +449,35 @@ public class EditorRenderer
             editor.Brush == EditorBrush.Box ? editor.BoxType : null,
             editor.Brush == EditorBrush.Obstacle ? editor.ObstacleType : null));
 
-    /// <summary>Barra de atalhos no rodapé: teclas em claro, o que fazem em apagado.</summary>
-    private void DrawControlsBar()
+    /// <summary>
+    /// Barra de atalhos no rodapé: teclas em claro, o que fazem em apagado. Com a ajuda desligada
+    /// (H), encolhe pra uma única dica — menos poluição na tela pra quem já sabe os atalhos.
+    /// </summary>
+    private void DrawControlsBar(LevelEditor editor)
     {
         float lh = _font.LineSpacing;
 
-        var mouseLine = new (string, Color)[]
+        var lines = editor.ShowHelp ? FullControls : CompactControls;
+
+        float width = 0;
+        foreach (var line in lines)
+            width = Math.Max(width, MeasureSegments(line));
+
+        var panel = new Rectangle(
+            Pad, _device.Viewport.Height - (int)(lines.Length * lh) - Pad * 3,
+            (int)width + Pad * 2, (int)(lines.Length * lh) + Pad * 2);
+        Fill(panel, PanelBg);
+
+        float x = panel.X + Pad, y = panel.Y + Pad;
+        foreach (var line in lines)
+            Line(x, ref y, lh, line);
+    }
+
+    // Rodapé de atalhos, agrupado por família (mouse / edição / arquivo+visão). Estático: não
+    // depende de estado, só o ShowHelp escolhe entre a versão cheia e a compacta.
+    private static readonly (string, Color)[][] FullControls =
+    {
+        new (string, Color)[]
         {
             ("Mouse   ", HeaderColor),
             ("Esq", TextColor), (" coloca/pinta   ", HintColor),
@@ -307,30 +486,44 @@ public class EditorRenderer
             ("Ctrl+Esq", TextColor), (" move   ", HintColor),
             ("Roda", TextColor), (" camada Y   ", HintColor),
             ("Ctrl+Roda", TextColor), (" valor", HintColor),
-        };
-        var keysLine = new (string, Color)[]
+        },
+        new (string, Color)[]
         {
-            ("Teclas  ", HeaderColor),
+            ("Editar  ", HeaderColor),
             ("WASD+QE", TextColor), (" cursor   ", HintColor),
             ("Espaco", TextColor), (" coloca   ", HintColor),
             ("Del", TextColor), (" apaga   ", HintColor),
             ("Ctrl+Z/Y", TextColor), (" desfaz/refaz   ", HintColor),
-            ("Shift+WASD/QE", TextColor), (" grid   ", HintColor),
+            ("Shift+WASD/QE", TextColor), (" grid", HintColor),
+        },
+        new (string, Color)[]
+        {
+            ("Camera  ", HeaderColor),
+            ("Alt+Arrasto", TextColor), (" orbita   ", HintColor),
+            ("Alt+Roda", TextColor), (" zoom   ", HintColor),
+            ("+ / -", TextColor), (" zoom", HintColor),
+        },
+        new (string, Color)[]
+        {
+            ("Arquivo ", HeaderColor),
             ("Ctrl+S", TextColor), (" salva   ", HintColor),
-            ("F9", TextColor), (" carrega   ", HintColor),
-            ("N", TextColor), (" novo", HintColor),
-        };
+            ("Ctrl+O", TextColor), (" carrega   ", HintColor),
+            ("Ctrl+N", TextColor), (" novo   ", HintColor),
+            ("Ctrl+D", TextColor), (" duplica   ", HintColor),
+            ("V", TextColor), (" valida   ", HintColor),
+            ("G", TextColor), (" grade   ", HintColor),
+            ("H", TextColor), (" ajuda", HintColor),
+        },
+    };
 
-        float width = Math.Max(MeasureSegments(mouseLine), MeasureSegments(keysLine));
-        var panel = new Rectangle(
-            Pad, _device.Viewport.Height - (int)(2 * lh) - Pad * 3,
-            (int)width + Pad * 2, (int)(2 * lh) + Pad * 2);
-        Fill(panel, PanelBg);
-
-        float x = panel.X + Pad, y = panel.Y + Pad;
-        Line(x, ref y, lh, mouseLine);
-        Line(x, ref y, lh, keysLine);
-    }
+    private static readonly (string, Color)[][] CompactControls =
+    {
+        new (string, Color)[]
+        {
+            ("H", TextColor), (" ajuda   ", HintColor),
+            ("Tab", TextColor), (" jogar", HintColor),
+        },
+    };
 
     // ----- Primitivas de desenho -----
 
