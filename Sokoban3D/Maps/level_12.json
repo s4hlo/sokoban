@@ -1,7 +1,7 @@
 {
   "Name": "Showcase: Trilhos",
   "Id": 12,
-  "Width": 14, "Height": 3, "Depth": 6,
+  "Width": 13, "Height": 3, "Depth": 6,
   "Players": [
     [3, 1, 1]
   ],
