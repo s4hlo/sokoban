@@ -190,8 +190,9 @@ public class MovementSystem
     /// olhar (frente ou ré). O corpo inteiro é erguido do grid primeiro — o movimento é simultâneo
     /// e o destino de uma peça costuma ser a célula que outra está liberando —, então cada peça
     /// resolve sua célula nova com o PushInto (livre, empurrando, quebrando frágil). Qualquer peça
-    /// bloqueada trava o corpo inteiro. Portal não passa corpo rígido: um PushInto que redireciona
-    /// (landing fora do alvo) conta como bloqueio.
+    /// bloqueada trava o corpo inteiro. Portal não passa o PLAYER grudado (redirecionamento nele
+    /// conta como bloqueio), mas uma CAIXA do corpo atravessa: assenta do lado oposto da parceira
+    /// e, longe do player, o grude derivado se desfaz sozinho — o portal desprende a caixa.
     /// </summary>
     private void TryMoveBody(Entity player, GridPosition pos, List<(Entity Box, int Ox, int Oz)> magnets, int dx, int dz)
     {
@@ -236,15 +237,23 @@ public class MovementSystem
         foreach (var (box, ox, oz) in magnets)
             pieces.Add((box, new GridPosition(pos.X + ox + dx, pos.Y, pos.Z + oz + dz), true));
 
+        var landings = new List<(Entity E, GridPosition To, GridPosition Landing)>();
         bool ok = true;
-        foreach (var (_, to, isCargo) in pieces)
+        foreach (var (e, to, isCargo) in pieces)
         {
             var landing = PushInto(to.X, to.Y, to.Z, dx, dz, PlayerPushStrength, new HashSet<Entity>(), direct: true, cargo: isCargo);
-            if (landing is null || landing.Value.X != to.X || landing.Value.Y != to.Y || landing.Value.Z != to.Z)
+            bool redirected = landing is not null
+                && (landing.Value.X != to.X || landing.Value.Y != to.Y || landing.Value.Z != to.Z);
+            // Redirecionamento de portal: barra o player (portal não passa o corpo em volta dele),
+            // mas uma caixa do corpo atravessa e assenta na saída da parceira. Duas peças não
+            // podem assentar na MESMA célula — colisão só possível via teleporte, e trava o corpo.
+            if (landing is null || (redirected && !isCargo)
+                || landings.Exists(l => l.Landing.X == landing.Value.X && l.Landing.Y == landing.Value.Y && l.Landing.Z == landing.Value.Z))
             {
                 ok = false;
                 break;
             }
+            landings.Add((e, to, landing.Value));
         }
 
         if (!ok)
@@ -258,9 +267,14 @@ public class MovementSystem
             return;
         }
 
-        foreach (var (e, to, _) in pieces)
+        foreach (var (e, to, landing) in landings)
         {
-            _world.World.Set(e, to);
+            // Assentou fora da célula à frente → atravessou um portal: anima o teleporte. A marca
+            // só é feita aqui, com o corpo inteiro aprovado — feita durante a resolução, vazaria
+            // pro render se outra peça travasse o movimento depois dela.
+            if (landing.X != to.X || landing.Y != to.Y || landing.Z != to.Z)
+                MarkTeleport(e, to.X, to.Y, to.Z, landing, dx, dz);
+            _world.World.Set(e, landing);
             _world.Occupy(e);
         }
 
@@ -273,7 +287,10 @@ public class MovementSystem
     /// passando pela diagonal — empurrando o que estiver no caminho na direção tangente do arco.
     /// Parede ou peça imóvel em qualquer célula varrida trava o giro inteiro (o olhar não muda),
     /// mas o que a varredura JÁ empurrou fica empurrado. Como as caixas do corpo mudam de célula,
-    /// um giro bem-sucedido é sempre um turno de verdade (gravidade + histórico).
+    /// um giro bem-sucedido é sempre um turno de verdade (gravidade + histórico). Portal em célula
+    /// varrida teleporta a caixa: ela sai pela parceira (na tangente se o portal está na diagonal,
+    /// em -offset se está no destino), assenta lá e o grude derivado se desfaz — o player fica
+    /// onde está e só o olhar gira.
     /// </summary>
     private void TryRotateBody(Entity player, GridPosition pos, Facing f, List<(Entity Box, int Ox, int Oz)> magnets, int dx, int dz)
     {
@@ -308,7 +325,7 @@ public class MovementSystem
         foreach (var (box, _, _) in magnets)
             _world.Vacate(box);
 
-        var landings = new List<(Entity Box, GridPosition To)>();
+        var landings = new List<(Entity Box, GridPosition Entry, GridPosition Landing, int Tx, int Tz)>();
         bool ok = true;
         foreach (var (box, ox, oz) in magnets)
         {
@@ -316,23 +333,48 @@ public class MovementSystem
             int diagX = pos.X + ox + nx, diagZ = pos.Z + oz + nz; // por onde a caixa passa
             int destX = pos.X + nx, destZ = pos.Z + nz;           // onde ela assenta
 
-            // A diagonal é varrida na direção do giro; o destino, pra "trás" do offset antigo.
-            // As duas células precisam FICAR livres (redirecionamento de portal não serve).
+            // A diagonal é varrida na direção do giro. Redirecionamento aqui é portal na
+            // diagonal: a caixa teleporta NO MEIO do arco — sai pela parceira na tangente,
+            // assenta lá e nunca chega ao destino (o grude derivado se desfaz sozinho).
             var atDiag = PushInto(diagX, pos.Y, diagZ, nx, nz, PlayerPushStrength, new HashSet<Entity>(), direct: true, cargo: true);
-            if (atDiag is null || atDiag.Value.X != diagX || atDiag.Value.Y != pos.Y || atDiag.Value.Z != diagZ)
+            if (atDiag is null)
             {
                 ok = false;
                 break;
             }
 
-            var atDest = PushInto(destX, pos.Y, destZ, -ox, -oz, PlayerPushStrength, new HashSet<Entity>(), direct: true, cargo: true);
-            if (atDest is null || atDest.Value.X != destX || atDest.Value.Y != pos.Y || atDest.Value.Z != destZ)
+            GridPosition entry, landing;
+            int tx, tz;
+            if (atDiag.Value.X != diagX || atDiag.Value.Y != pos.Y || atDiag.Value.Z != diagZ)
+            {
+                entry = new GridPosition(diagX, pos.Y, diagZ);
+                landing = atDiag.Value;
+                tx = nx; tz = nz;
+            }
+            else
+            {
+                // Diagonal ficou livre: a caixa segue até o destino, entrando pra "trás" do
+                // offset antigo. Portal no destino também teleporta (redirecionamento aceito).
+                var atDest = PushInto(destX, pos.Y, destZ, -ox, -oz, PlayerPushStrength, new HashSet<Entity>(), direct: true, cargo: true);
+                if (atDest is null)
+                {
+                    ok = false;
+                    break;
+                }
+                entry = new GridPosition(destX, pos.Y, destZ);
+                landing = atDest.Value;
+                tx = -ox; tz = -oz;
+            }
+
+            // Duas caixas não podem assentar na mesma célula — colisão só possível via
+            // teleporte, e trava o giro inteiro.
+            if (landings.Exists(l => l.Landing.X == landing.X && l.Landing.Y == landing.Y && l.Landing.Z == landing.Z))
             {
                 ok = false;
                 break;
             }
 
-            landings.Add((box, new GridPosition(destX, pos.Y, destZ)));
+            landings.Add((box, entry, landing, tx, tz));
         }
 
         if (!ok)
@@ -346,9 +388,14 @@ public class MovementSystem
             return;
         }
 
-        foreach (var (box, to) in landings)
+        foreach (var (box, entry, landing, tx, tz) in landings)
         {
-            _world.World.Set(box, to);
+            // Assentou fora da célula em que entrou → atravessou um portal: anima o teleporte.
+            // A marca só é feita aqui, com o giro inteiro aprovado — feita durante a resolução,
+            // vazaria pro render se outra caixa travasse o giro depois dela.
+            if (landing.X != entry.X || landing.Y != entry.Y || landing.Z != entry.Z)
+                MarkTeleport(box, entry.X, entry.Y, entry.Z, landing, tx, tz);
+            _world.World.Set(box, landing);
             _world.Occupy(box);
         }
         _world.World.Set(player, new Facing { Dx = dx, Dz = dz });
