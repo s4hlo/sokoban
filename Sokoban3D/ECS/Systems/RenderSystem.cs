@@ -24,6 +24,9 @@ public class RenderSystem
     // "Nariz" do player: cubinho claro na face pra onde ele olha (essencial com caixa magnética
     // grudada, quando o olhar decide se um comando anda ou gira).
     private static readonly Color PlayerNoseColor = new(230, 238, 250);
+    // Elo do grude magnético: laranja "energizado", bem distinto do nariz branco — os dois
+    // aparecem juntos e não podem se confundir.
+    private static readonly Color MagnetLinkColor = new(255, 140, 40);
 
     // Meta do nível (dourado; apagada enquanto houver coletável pendente) e portais para níveis
     // filhos (ciano; verde quando concluído).
@@ -236,14 +239,30 @@ public class RenderSystem
                 return;
             }
 
+            // Caixa varrendo o arco do giro magnético: além de orbitar o player (OrbitAnim dirige
+            // a RenderPosition), o cubo GIRA em torno do próprio eixo pelo mesmo deslocamento
+            // angular — corpo rígido de verdade. O ângulo restante zera quando o arco encaixa,
+            // então ela termina alinhada ao grid sem estalo (e o quarto de volta preserva a
+            // simetria do cubo).
+            if (_world.World.Has<OrbitAnim>(e))
+            {
+                var o = _world.World.Get<OrbitAnim>(e);
+                float spin = MathHelper.WrapAngle(o.EndAngle - o.Angle);
+                var world = Matrix.CreateRotationY(spin) * Matrix.CreateTranslation(r.Value);
+                _cubes.Draw(world, ColorOf(b.Type), view, projection);
+                return;
+            }
+
             _cubes.Draw(r.Value, boxScale, ColorOf(b.Type), view, projection);
         });
     }
 
     /// <summary>
-    /// Elo do grude magnético: um cubinho claro na junta entre o player e cada caixa magnética
-    /// grudada (derivado da adjacência lógica, ver <see cref="Magnetism"/>), no ponto médio das
-    /// posições VISUAIS — acompanha o deslize das duas peças durante as animações.
+    /// Elo do grude magnético: uma presilha laranja deitada POR CIMA da junta entre o player e
+    /// cada caixa magnética grudada (derivado da adjacência lógica, ver <see cref="Magnetism"/>),
+    /// apoiada nos topos das duas peças — visível da câmera alta, ao contrário de um cubinho
+    /// espremido na fresta, e inconfundível com o nariz branco. Orientada e centrada pelas
+    /// posições VISUAIS — acompanha o deslize e o arco do giro durante as animações.
     /// </summary>
     private void DrawMagnetLinks(Matrix view, Matrix projection)
     {
@@ -252,13 +271,21 @@ public class RenderSystem
             return;
         var pr = _world.World.Get<RenderPosition>(player.Value).Value;
 
-        var linkScale = new Vector3(0.22f);
         foreach (var (box, _, _) in Magnetism.Attached(_world))
         {
             if (!_world.World.Has<RenderPosition>(box))
                 continue;
             var br = _world.World.Get<RenderPosition>(box).Value;
-            _cubes.Draw((pr + br) * 0.5f, linkScale, PlayerNoseColor, view, projection);
+
+            // Barra modelada ao longo do X local e girada pra apontar do player à caixa. A altura
+            // (+0.5 do centro das peças) encaixa o corpo dela sobre o topo do player (+0.4) e
+            // deixa uma lâmina aparecendo acima do topo da caixa (+0.5) — ancorada nos dois.
+            var d = br - pr;
+            float yaw = System.MathF.Atan2(-d.Z, d.X);
+            var world = Matrix.CreateScale(0.7f, 0.18f, 0.24f)
+                * Matrix.CreateRotationY(yaw)
+                * Matrix.CreateTranslation((pr + br) * 0.5f + new Vector3(0f, 0.5f, 0f));
+            _cubes.Draw(world, MagnetLinkColor, view, projection);
         }
     }
 

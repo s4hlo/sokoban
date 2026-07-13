@@ -40,3 +40,21 @@ public struct TeleportAnim
     public Vector3 Exit;
     public float Elapsed;
 }
+
+/// <summary>
+/// Animação transitória do giro do corpo magnético: enquanto presente, a <see cref="RenderPosition"/>
+/// da caixa varre um arco ao redor de <see cref="Center"/> (a célula do player, que fica parado no
+/// giro), em vez de deslizar reto pela diagonal. Ângulo e raio são suavizados com a MESMA constante
+/// do yaw do olhar, então a caixa gira em sincronia com o nariz do player. O
+/// <see cref="Systems.MoveAnimationSystem"/> a remove ao encaixar no destino (ou na hora, se um novo
+/// turno mudar a célula da caixa no meio do arco). Só a põe o giro do corpo
+/// (<see cref="Systems.MovementSystem"/>).
+/// </summary>
+public struct OrbitAnim
+{
+    public Vector3 Center;
+    public float Angle;
+    public float Radius;
+    public float EndAngle;
+    public float EndRadius;
+}

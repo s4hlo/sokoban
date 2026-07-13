@@ -34,15 +34,20 @@ public class MoveAnimationSystem
     // estrutural não pode rodar durante a iteração). Campo pra não realocar a cada frame.
     private readonly List<Entity> _finishedTeleports = new();
 
+    // Idem pros arcos do giro magnético (OrbitAnim).
+    private readonly List<Entity> _finishedOrbits = new();
+
     public void Update(GameWorld session, float deltaSeconds)
     {
         UpdateTeleports(session, deltaSeconds);
         UpdateFacing(session, deltaSeconds);
+        UpdateOrbits(session, deltaSeconds);
 
         float t = 1f - MathF.Exp(-Smoothing * deltaSeconds);
 
-        // Quem está em teleporte é dirigido pelo UpdateTeleports; fica fora do deslize normal.
-        var query = new QueryDescription().WithAll<GridPosition, RenderPosition>().WithNone<TeleportAnim>();
+        // Quem está em teleporte ou em arco de giro é dirigido pelo UpdateTeleports/UpdateOrbits;
+        // fica fora do deslize normal.
+        var query = new QueryDescription().WithAll<GridPosition, RenderPosition>().WithNone<TeleportAnim, OrbitAnim>();
         session.World.Query(in query, (ref GridPosition grid, ref RenderPosition render) =>
         {
             var target = GridView.ToWorld(session.Grid, grid.X, grid.Y, grid.Z, GridView.PieceRise);
@@ -88,6 +93,53 @@ public class MoveAnimationSystem
             }
             r.Yaw = MathHelper.WrapAngle(r.Yaw + diff * t);
         });
+    }
+
+    /// <summary>
+    /// Dirige o arco das caixas em giro do corpo magnético (<see cref="OrbitAnim"/>): ângulo e
+    /// raio deslizam com a MESMA suavização do yaw do olhar, então a caixa varre o quarto de
+    /// volta em sincronia com o giro do nariz do player. Sempre pelo arco mais curto (WrapAngle)
+    /// — o quarto de volta nunca passa de π/2, então o arco curto é sempre o arco certo. Se um
+    /// novo turno mudar a célula da caixa antes de o arco terminar, o destino gravado ficou
+    /// velho: abandona o arco e devolve a peça ao deslize normal.
+    /// </summary>
+    private void UpdateOrbits(GameWorld session, float deltaSeconds)
+    {
+        _finishedOrbits.Clear();
+        float t = 1f - MathF.Exp(-RotationSmoothing * deltaSeconds);
+
+        var query = new QueryDescription().WithAll<OrbitAnim, GridPosition, RenderPosition>().WithNone<TeleportAnim>();
+        session.World.Query(in query, (Entity e, ref OrbitAnim o, ref GridPosition grid, ref RenderPosition render) =>
+        {
+            var final = GridView.ToWorld(session.Grid, grid.X, grid.Y, grid.Z, GridView.PieceRise);
+
+            float endX = o.Center.X + MathF.Cos(o.EndAngle) * o.EndRadius;
+            float endZ = o.Center.Z + MathF.Sin(o.EndAngle) * o.EndRadius;
+            if ((final.X - endX) * (final.X - endX) + (final.Z - endZ) * (final.Z - endZ) > SnapDistanceSq)
+            {
+                _finishedOrbits.Add(e);
+                return;
+            }
+
+            float diff = MathHelper.WrapAngle(o.EndAngle - o.Angle);
+            o.Angle += diff * t;
+            o.Radius = MathHelper.Lerp(o.Radius, o.EndRadius, t);
+            float ny = MathHelper.Lerp(render.Value.Y, final.Y, t);
+            render.Value = new Vector3(
+                o.Center.X + MathF.Cos(o.Angle) * o.Radius,
+                ny,
+                o.Center.Z + MathF.Sin(o.Angle) * o.Radius);
+
+            if (MathF.Abs(MathHelper.WrapAngle(o.EndAngle - o.Angle)) < SnapAngle
+                && Vector3.DistanceSquared(render.Value, final) < SnapDistanceSq)
+            {
+                render.Value = final;
+                _finishedOrbits.Add(e);
+            }
+        });
+
+        foreach (var e in _finishedOrbits)
+            session.World.Remove<OrbitAnim>(e);
     }
 
     /// <summary>
@@ -144,6 +196,12 @@ public class MoveAnimationSystem
         session.World.Query(in anims, (Entity e) => _finishedTeleports.Add(e));
         foreach (var e in _finishedTeleports)
             session.World.Remove<TeleportAnim>(e);
+
+        _finishedOrbits.Clear();
+        var orbits = new QueryDescription().WithAll<OrbitAnim>();
+        session.World.Query(in orbits, (Entity e) => _finishedOrbits.Add(e));
+        foreach (var e in _finishedOrbits)
+            session.World.Remove<OrbitAnim>(e);
 
         var query = new QueryDescription().WithAll<GridPosition, RenderPosition>();
         session.World.Query(in query, (ref GridPosition grid, ref RenderPosition render) =>

@@ -392,9 +392,12 @@ public class MovementSystem
         {
             // Assentou fora da célula em que entrou → atravessou um portal: anima o teleporte.
             // A marca só é feita aqui, com o giro inteiro aprovado — feita durante a resolução,
-            // vazaria pro render se outra caixa travasse o giro depois dela.
+            // vazaria pro render se outra caixa travasse o giro depois dela. Sem portal, a caixa
+            // seguiu presa no corpo: ganha o arco ao redor do player em vez do deslize reto.
             if (landing.X != entry.X || landing.Y != entry.Y || landing.Z != entry.Z)
                 MarkTeleport(box, entry.X, entry.Y, entry.Z, landing, tx, tz);
+            else
+                StartOrbitAnim(box, pos, landing);
             _world.World.Set(box, landing);
             _world.Occupy(box);
         }
@@ -727,6 +730,35 @@ public class MovementSystem
         var entry = GridView.ToWorld(_world.Grid, entryX, entryY, entryZ, GridView.PieceRise);
         var exit = GridView.ToWorld(_world.Grid, landing.X - dx, landing.Y, landing.Z - dz, GridView.PieceRise);
         _teleported[entity] = (entry, exit);
+    }
+
+    /// <summary>
+    /// Anexa a <see cref="OrbitAnim"/> da caixa que girou com o corpo: o arco parte da posição
+    /// visual atual da caixa e varre ao redor da célula do player (o pivô — ele não sai do lugar
+    /// no giro) até a célula girada. Como as TeleportAnim, só escreve componente — puro CPU,
+    /// headless ninguém consome. O <see cref="MoveAnimationSystem"/> dirige o arco e o remove.
+    /// </summary>
+    private void StartOrbitAnim(Entity box, GridPosition pivot, GridPosition landing)
+    {
+        if (!_world.World.Has<RenderPosition>(box))
+            return;
+
+        var center = GridView.ToWorld(_world.Grid, pivot.X, pivot.Y, pivot.Z, GridView.PieceRise);
+        var start = _world.World.Get<RenderPosition>(box).Value - center;
+        var end = GridView.ToWorld(_world.Grid, landing.X, landing.Y, landing.Z, GridView.PieceRise) - center;
+
+        var anim = new OrbitAnim
+        {
+            Center = center,
+            Angle = System.MathF.Atan2(start.Z, start.X),
+            Radius = System.MathF.Sqrt(start.X * start.X + start.Z * start.Z),
+            EndAngle = System.MathF.Atan2(end.Z, end.X),
+            EndRadius = System.MathF.Sqrt(end.X * end.X + end.Z * end.Z),
+        };
+        if (_world.World.Has<OrbitAnim>(box))
+            _world.World.Set(box, anim);
+        else
+            _world.World.Add(box, anim);
     }
 
     /// <summary>
