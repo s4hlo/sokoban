@@ -14,7 +14,7 @@ public class Camera
 
     // Fator de aproximação do enquadramento padrão: 1 = o afastamento original; menor = mais
     // perto. Escala a posição inteira, então o ângulo isométrico não muda.
-    private const float Zoom = 0.85f;
+    private const float Zoom = 0.7f;
 
     public Camera(float aspectRatio, int gridWidth, int gridDepth)
     {
