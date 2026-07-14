@@ -78,9 +78,10 @@ public class LevelEditor
     private Task<SolveResult> _validationTask;
 
     // Confirmação de duas etapas pras ações que descartam edições não salvas (novo/carregar):
-    // a primeira arma, a repetição confirma. Qualquer edição ou salvamento limpa (ver ConfirmDestructive).
-    private enum Confirm { None, New, Load }
-    private Confirm _pendingConfirm = Confirm.None;
+    // a primeira arma, a repetição confirma. Qualquer edição ou salvamento limpa (ver
+    // ConfirmDestructive). O padrão mora no RepeatConfirm (compartilhado com o solver).
+    private enum Confirm { New, Load }
+    private readonly RepeatConfirm _confirm = new();
 
     // Renomear inline: enquanto ativo, o teclado alimenta o buffer (via OnTextInput, o evento de
     // texto do Game1) em vez de mover o cursor; Enter confirma, Esc cancela.
@@ -166,7 +167,7 @@ public class LevelEditor
         IsDirty = false;
         Validation = EditorValidation.Idle;
         _validationTask = null;
-        _pendingConfirm = Confirm.None;
+        _confirm.Clear();
         _renaming = false;
 
         CursorX = _working.Width / 2;
@@ -378,7 +379,7 @@ public class LevelEditor
     private void MarkChanged()
     {
         IsDirty = true;
-        _pendingConfirm = Confirm.None; // uma edição invalida qualquer "repita pra confirmar" pendente
+        _confirm.Clear(); // uma edição invalida qualquer "repita pra confirmar" pendente
         if (Validation != EditorValidation.Running)
             Validation = EditorValidation.Idle;
     }
@@ -390,12 +391,13 @@ public class LevelEditor
     /// </summary>
     private bool ConfirmDestructive(Confirm action, string warning)
     {
-        if (!IsDirty || _pendingConfirm == action)
+        if (!IsDirty)
         {
-            _pendingConfirm = Confirm.None;
+            _confirm.Clear();
             return true;
         }
-        _pendingConfirm = action;
+        if (_confirm.Press(action))
+            return true;
         SetStatus($"{warning} — repita pra confirmar", warning: true);
         return false;
     }
@@ -1308,7 +1310,7 @@ public class LevelEditor
         int created = CreateMissingPortalTargets();
 
         IsDirty = false;
-        _pendingConfirm = Confirm.None;
+        _confirm.Clear();
         SetStatus(created > 0
             ? $"Salvo: {path} (+{created} mapa(s) novo(s))"
             : $"Salvo: {path}");

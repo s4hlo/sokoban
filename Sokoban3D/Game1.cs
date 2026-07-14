@@ -46,6 +46,11 @@ public class Game1 : Game
     private SolverRenderer _solverRenderer;
     private bool _solverActive;
 
+    // Confirmação de duas etapas do P (a busca pode congelar ~30s): 1º P arma, 2º P resolve.
+    // Mesmo helper do confirm do editor. Token constante — só há uma ação a confirmar aqui.
+    private readonly RepeatConfirm _solveConfirm = new();
+    private static readonly object SolveToken = new();
+
     // Lista de níveis do modo de jogo (tecla M): modal pra navegar e pular pra outro nível sem
     // entrar no editor. Enquanto aberta, o input do player fica suspenso (W/S navega, Enter vai).
     private LevelBrowser _levelBrowser;
@@ -204,26 +209,37 @@ public class Game1 : Game
             return;
         }
 
-        // P alterna o solver-playback (dev tool). Ao entrar, o nível reseta pro estado de
-        // receita (o solver resolve a partir do zero) e a solução executa sozinha.
-        // C é o irmão do P: mesmo playback, mas tocando o CERTIFICADO gravado
-        // (Solutions/level_N.moves) em vez de buscar. Qualquer um dos dois — ou Esc — sai do modo.
+        // P dispara a busca do solver (dev tool). Como a busca pode CONGELAR o jogo por até ~30s,
+        // ela pede confirmação de duas etapas (mesmo RepeatConfirm do editor): o 1º P só arma (o
+        // HUD avisa), o 2º P confirma e resolve. Mover cancela o armado. C é o irmão do P, mas toca
+        // o CERTIFICADO gravado (rápido, sem congelar), então entra direto. Esc/P (ou C) sai do modo.
         bool searchKey = Pressed(keyboard, Keys.P);
         bool certificateKey = !searchKey && Pressed(keyboard, Keys.C);
         bool escLeavesSolver = _solverActive && Pressed(keyboard, Keys.Escape);
-        if (searchKey || certificateKey || escLeavesSolver)
+        if (searchKey)
         {
+            if (_solverActive)
+            {
+                _solverActive = false;
+                _solver.Exit(Active);
+            }
+            else if (_solveConfirm.Press(SolveToken)) // 2ª batida: confirma a busca
+            {
+                _solverActive = true;
+                _solver.Enter(Active);
+                _recorder.Reset(Active.LevelId);
+                _animationSystem.SnapAll(Active);
+            }
+            // 1ª batida: só armou — o HUD mostra a dica, o jogo segue jogável
+        }
+        else if (certificateKey || escLeavesSolver)
+        {
+            _solveConfirm.Clear(); // um C ou Esc descarta o "P armado" pendente
             _solverActive = !_solverActive;
             if (_solverActive)
             {
-                if (searchKey)
-                    _solver.Enter(Active);
-                else
-                    _solver.EnterCertificate(Active);
-                // O solver também reseta o mundo pro estado de receita (FullReset) — o log da
-                // tentativa reseta junto, senão jogadas manuais de antes vazam pro certificado.
+                _solver.EnterCertificate(Active);
                 _recorder.Reset(Active.LevelId);
-                // FullReset é instantâneo: encaixa o render sem deslizar, como no F.
                 _animationSystem.SnapAll(Active);
             }
             else
@@ -280,6 +296,10 @@ public class Game1 : Game
 
         var stepped = _movementSystem.Update(Active, keyboard);
         _recorder.RecordStep(stepped.Dx, stepped.Dz);
+
+        // Mover cancela o "P armado" (como uma edição cancela o confirm do editor).
+        if (stepped.Dx != 0 || stepped.Dz != 0)
+            _solveConfirm.Clear();
 
         // Placas de pressão são estado derivado da posição das peças: re-deriva todo frame,
         // independente do que mexeu nas posições (movimento, undo ou nada).
@@ -508,6 +528,10 @@ public class Game1 : Game
         _hudBatch.Begin();
         DrawShadowed(label, new Vector2(16, 12), Color.White);
         DrawShadowed("< > troca nivel   M lista", new Vector2(16, 12 + _hudFont.LineSpacing), Color.LightGray * 0.8f);
+        // Solver armado: avisa que o 2º P vai rodar a busca (que pode congelar).
+        if (_solveConfirm.Pending)
+            DrawShadowed("P de novo: resolver (pode congelar ~30s) · mover cancela",
+                new Vector2(16, 12 + _hudFont.LineSpacing * 2), new Color(245, 165, 70));
         _hudBatch.End();
     }
 
