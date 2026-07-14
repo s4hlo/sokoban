@@ -6,7 +6,6 @@ using Microsoft.Xna.Framework.Graphics;
 using Sokoban3D.Core;
 using Sokoban3D.ECS.Components;
 using Sokoban3D.Grid;
-using Sokoban3D.Levels;
 
 namespace Sokoban3D.Editor;
 
@@ -60,10 +59,6 @@ public class EditorRenderer
     // Item sob o ponteiro no último HitTestBrush (chamado todo frame), pro highlight de hover.
     private PaletteItem? _hoverItem;
 
-    // Caixas de clique das linhas da lista de níveis (índice = posição na lista), preenchidas a
-    // cada DrawLevelListPanel — o clique acerta exatamente a linha desenhada.
-    private readonly List<Rectangle> _levelHitboxes = new();
-
     // A paleta na ordem do HUD: tecla de atalho + nome. Cada tipo de caixa tem a própria
     // linha (a tecla 2 cicla entre elas; o clique escolhe direto). A cor vem de ItemColor.
     private static readonly (PaletteItem Item, string Key, string Name)[] Palette =
@@ -101,109 +96,14 @@ public class EditorRenderer
 
     public void Draw(GameWorld session, LevelEditor editor, Matrix view, Matrix projection)
     {
-        // Lista de reordenação: painel modal sobre a cena, sem os overlays de edição.
-        if (editor.ShowLevelList)
-        {
-            DrawLevelListPanel(editor);
-            return;
-        }
-
+        // A lista de níveis (modal) é desenhada pelo Game1 com o LevelListRenderer compartilhado —
+        // aqui só os overlays de edição. O Game1 não chama este Draw enquanto a lista está aberta.
         if (editor.ShowPlane)
             DrawBuildPlane(session, editor, view, projection);
         DrawGhost(session, editor, view, projection);
         DrawCursor(session, editor, view, projection);
         DrawLabels(session, view, projection);
         DrawHud(editor);
-    }
-
-    /// <summary>
-    /// Painel da lista de níveis (tecla L ou M): id + nome de cada nível na ordem dos ids, com a linha
-    /// selecionada realçada e o nível em edição marcado. W/S navega, Shift+W/S troca o selecionado
-    /// de posição (reordena os ids), Enter/clique vai pro nível. As linhas são clicáveis (hitboxes
-    /// preenchidas aqui, consumidas por <see cref="HitTestLevelRow"/>).
-    /// </summary>
-    private void DrawLevelListPanel(LevelEditor editor)
-    {
-        _spriteBatch.Begin();
-        float lh = _font.LineSpacing;
-        var list = editor.LevelList;
-
-        const string header = "NIVEIS";
-        const string hint = "W/S: navegar   clique/Enter: ir   Shift+W/S: mover   M/L/Esc: fechar";
-
-        int badgeSize = Math.Max(8, (int)lh - 6);
-        float reserve = _font.MeasureString("   ").X + 4 * (badgeSize + 4) + _font.MeasureString("  *").X;
-        float width = Math.Max(_font.MeasureString(header).X, _font.MeasureString(hint).X);
-        foreach (var (id, name, _) in list)
-            width = Math.Max(width, _font.MeasureString($"#{id:D2}  {name}").X + reserve);
-
-        int rows = Math.Max(1, list.Count) + 2; // header + dica + linhas
-        var panel = new Rectangle(Pad, Pad, (int)width + Pad * 2, (int)(rows * lh) + Pad * 2);
-        Fill(panel, PanelBg);
-
-        float x = panel.X + Pad, y = panel.Y + Pad;
-        DrawShadowed(header, new Vector2(x, y), HeaderColor);
-        y += lh;
-        DrawShadowed(hint, new Vector2(x, y), HintColor);
-        y += lh * 1.4f;
-
-        _levelHitboxes.Clear();
-        for (int i = 0; i < list.Count; i++)
-        {
-            var (id, name, badges) = list[i];
-            var row = new Rectangle(panel.X, (int)y, panel.Width, (int)lh);
-            bool selected = i == editor.ListSelection;
-            if (selected)
-                Fill(row, Color.White * 0.14f);
-
-            Color rowColor = selected ? Color.White : TextColor;
-            string baseText = id == editor.Working.Id ? $"#{id:D2}  {name}  *" : $"#{id:D2}  {name}";
-            DrawShadowed(baseText, new Vector2(x, y), rowColor);
-
-            // Quadradinhos de mecânica alinhados à direita do painel.
-            DrawBadges(panel.Right - Pad, y, badges, badgeSize);
-
-            _levelHitboxes.Add(row);
-            y += lh;
-        }
-        if (list.Count == 0)
-            DrawShadowed("(nenhum nivel salvo)", new Vector2(x, y), HintColor);
-
-        _spriteBatch.End();
-    }
-
-    /// <summary>
-    /// Desenha os quadradinhos das mecânicas presentes (swatch, igual à paleta de brushes)
-    /// alinhados à direita, terminando em <paramref name="rightEdge"/>. Sombra de 1px atrás.
-    /// </summary>
-    private void DrawBadges(float rightEdge, float y, LevelBadges badges, int size)
-    {
-        const int gap = 4;
-        int n = 0;
-        foreach (var _ in badges.Colors())
-            n++;
-        if (n == 0)
-            return;
-
-        float x = rightEdge - (n * size + (n - 1) * gap);
-        foreach (var color in badges.Colors())
-        {
-            Fill(new Rectangle((int)x + 1, (int)y + 4, size, size), Color.Black * 0.6f);
-            Fill(new Rectangle((int)x, (int)y + 3, size, size), color);
-            x += size + gap;
-        }
-    }
-
-    /// <summary>
-    /// Índice da linha da lista de níveis sob o ponto de tela, ou null se nenhuma. Usa as caixas
-    /// desenhadas no último frame (mesmo padrão do <see cref="HitTestBrush"/>).
-    /// </summary>
-    public int? HitTestLevelRow(int x, int y)
-    {
-        for (int i = 0; i < _levelHitboxes.Count; i++)
-            if (_levelHitboxes[i].Contains(x, y))
-                return i;
-        return null;
     }
 
     private const float GhostAlpha = 0.4f;
@@ -614,7 +514,7 @@ public class EditorRenderer
             ("Ctrl+N", TextColor), (" novo   ", HintColor),
             ("Ctrl+D", TextColor), (" duplica   ", HintColor),
             ("R", TextColor), (" renomeia   ", HintColor),
-            ("L/M", TextColor), (" lista/ordena   ", HintColor),
+            ("M", TextColor), (" lista/ordena   ", HintColor),
             ("V", TextColor), (" valida   ", HintColor),
             ("G", TextColor), (" grade   ", HintColor),
             ("H", TextColor), (" ajuda", HintColor),

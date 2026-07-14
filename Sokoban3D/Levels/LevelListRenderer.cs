@@ -1,15 +1,18 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
 namespace Sokoban3D.Levels;
 
 /// <summary>
-/// Painel da lista de níveis do modo de jogo (tecla M): id + nome na ordem dos ids, com a linha
-/// selecionada realçada e o nível atual marcado. Espelha o painel da lista do editor, mas sem os
-/// controles de edição (renomear/reordenar). Só texto sobre a cena — o render 3D do jogo continua
-/// por baixo. A apresentação do <see cref="LevelBrowser"/>, como o <c>SolverRenderer</c> é do
-/// <c>SolverTool</c>.
+/// Painel da lista de níveis — a ÚNICA fonte de desenho, usada pelo modo de jogo (tecla M) e pelo
+/// editor. Desenha id + nome + quadradinhos de mecânica, com a linha selecionada realçada e o
+/// nível atual marcado com <c>*</c>, e registra as caixas de clique de cada linha
+/// (<see cref="HitTestRow"/>) — então mouse e layout ficam idênticos nos dois modos. Só o
+/// <paramref name="reorderable"/> muda a dica (o editor reordena; o jogo não). Não guarda estado
+/// de lista: recebe itens/seleção de quem chama (<see cref="LevelBrowser"/> no jogo,
+/// <c>LevelEditor</c> no editor).
 /// </summary>
 public class LevelListRenderer
 {
@@ -24,6 +27,10 @@ public class LevelListRenderer
     // Pixel branco 1x1 pra desenhar retângulos (fundo do painel, destaque da linha).
     private readonly Texture2D _pixel;
 
+    // Caixas de clique das linhas (índice = posição na lista), preenchidas a cada Draw e
+    // consumidas por HitTestRow no frame seguinte — mesmo padrão do hit-test de brush do editor.
+    private readonly List<Rectangle> _hitboxes = new();
+
     public LevelListRenderer(GraphicsDevice device, SpriteFont font)
     {
         _batch = new SpriteBatch(device);
@@ -32,15 +39,20 @@ public class LevelListRenderer
         _pixel.SetData(new[] { Color.White });
     }
 
-    public void Draw(LevelBrowser browser, int currentId)
+    /// <summary>
+    /// Desenha o painel. <paramref name="currentId"/> ganha o <c>*</c>; <paramref name="reorderable"/>
+    /// acrescenta a dica de reordenar (só o editor).
+    /// </summary>
+    public void Draw(IReadOnlyList<(int Id, string Name, LevelBadges Badges)> items,
+        int selection, int currentId, bool reorderable)
     {
-        var items = browser.Items;
-
         _batch.Begin();
         float lh = _font.LineSpacing;
 
         const string header = "NIVEIS";
-        const string hint = "W/S: navegar   Enter: ir   M/Esc: fechar";
+        string hint = reorderable
+            ? "W/S: navegar   clique/Enter: ir   Shift+W/S: mover   M/Esc: fechar"
+            : "W/S: navegar   clique/Enter: ir   M/Esc: fechar";
 
         int badgeSize = Math.Max(8, (int)lh - 6);
         float reserve = _font.MeasureString("   ").X + 4 * (badgeSize + 4) + _font.MeasureString("  *").X;
@@ -58,11 +70,12 @@ public class LevelListRenderer
         DrawShadowed(hint, new Vector2(x, y), HintColor);
         y += lh * 1.4f;
 
+        _hitboxes.Clear();
         for (int i = 0; i < items.Count; i++)
         {
             var (id, name, badges) = items[i];
             var row = new Rectangle(panel.X, (int)y, panel.Width, (int)lh);
-            bool selected = i == browser.Selection;
+            bool selected = i == selection;
             if (selected)
                 Fill(row, Color.White * 0.14f);
 
@@ -72,6 +85,7 @@ public class LevelListRenderer
 
             // Quadradinhos de mecânica alinhados à direita do painel.
             DrawBadges(panel.Right - Pad, y, badges, badgeSize);
+            _hitboxes.Add(row);
             y += lh;
         }
         if (items.Count == 0)
@@ -80,8 +94,17 @@ public class LevelListRenderer
         _batch.End();
     }
 
+    /// <summary>Índice da linha sob o ponto de tela, ou null. Usa as caixas do último Draw.</summary>
+    public int? HitTestRow(int x, int y)
+    {
+        for (int i = 0; i < _hitboxes.Count; i++)
+            if (_hitboxes[i].Contains(x, y))
+                return i;
+        return null;
+    }
+
     /// <summary>
-    /// Desenha os quadradinhos das mecânicas presentes (swatch, igual à paleta do editor)
+    /// Desenha os quadradinhos das mecânicas presentes (swatch, igual à paleta de brushes)
     /// alinhados à direita, terminando em <paramref name="rightEdge"/>. Sombra de 1px atrás pra
     /// destacar do fundo.
     /// </summary>

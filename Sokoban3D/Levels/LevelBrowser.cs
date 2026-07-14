@@ -45,6 +45,13 @@ public sealed class LevelBrowser
 
     public void Close() => Visible = false;
 
+    /// <summary>Seleciona uma linha por índice (mouse/hover); ignora fora dos limites.</summary>
+    public void Select(int index)
+    {
+        if (index >= 0 && index < _items.Count)
+            Selection = index;
+    }
+
     public void MoveUp()
     {
         if (_items.Count > 0)

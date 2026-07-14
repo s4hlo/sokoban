@@ -138,7 +138,7 @@ public class LevelEditor
     public bool IsRenaming => _renaming;
     /// <summary>Texto sendo digitado no rename (só válido com <see cref="IsRenaming"/>).</summary>
     public string NameBuffer => _nameBuffer;
-    /// <summary>Lista de níveis pra reordenar (tecla L ou M) está aberta.</summary>
+    /// <summary>Lista de níveis pra reordenar (tecla M) está aberta.</summary>
     public bool ShowLevelList { get; private set; }
     /// <summary>True em qualquer modo modal (rename ou lista): o Game1 segura Tab/Esc.</summary>
     public bool IsModal => _renaming || ShowLevelList;
@@ -294,7 +294,7 @@ public class LevelEditor
         if (Pressed(k, Keys.H)) ShowHelp = !ShowHelp;
         if (Pressed(k, Keys.G)) ShowPlane = !ShowPlane;
         if (Pressed(k, Keys.V)) Validate();
-        if (Pressed(k, Keys.L) || Pressed(k, Keys.M)) ToggleLevelList();
+        if (Pressed(k, Keys.M)) ToggleLevelList();
         if (Pressed(k, Keys.R)) BeginRename();
     }
 
@@ -370,7 +370,7 @@ public class LevelEditor
         SetStatus("Renomear cancelado");
     }
 
-    // ----- Lista de níveis / reordenar (L ou M) -----
+    // ----- Lista de níveis / reordenar (M) -----
 
     private void ToggleLevelList()
     {
@@ -378,7 +378,7 @@ public class LevelEditor
         if (ShowLevelList)
         {
             RefreshLevelList();
-            SetStatus("Lista: W/S navega, Shift+W/S reordena, Enter edita, M/L/Esc fecha");
+            SetStatus("Lista: W/S navega, Shift+W/S reordena, Enter edita, M/Esc fecha");
         }
     }
 
@@ -426,7 +426,7 @@ public class LevelEditor
             }
         }
 
-        if (Pressed(k, Keys.L) || Pressed(k, Keys.M) || Pressed(k, Keys.Escape))
+        if (Pressed(k, Keys.M) || Pressed(k, Keys.Escape))
         {
             ShowLevelList = false;
             return;

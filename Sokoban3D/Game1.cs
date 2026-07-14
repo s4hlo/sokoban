@@ -25,6 +25,8 @@ public class Game1 : Game
     private LevelNavigator _navigator;
     private Camera _camera;
     private KeyboardState _previousKeyboard;
+    // Mouse do frame anterior, pra detecção de borda de clique e de movimento na lista de níveis.
+    private MouseState _previousMouse;
 
     // Editor de níveis: alterna com Tab. Enquanto ativo, os sistemas de jogo ficam pausados.
     private LevelEditor _editor;
@@ -168,7 +170,8 @@ public class Game1 : Game
                 // e o botão de brush do HUD sob o ponteiro (null se não estiver sobre nenhum).
                 var brushButton = _editorRenderer.HitTestBrush(mouse.X, mouse.Y);
                 // Com a lista aberta, também resolve a linha sob o ponteiro (pra hover/clique).
-                int? levelRow = _editor.ShowLevelList ? _editorRenderer.HitTestLevelRow(mouse.X, mouse.Y) : null;
+                // O hit-test vem do renderer compartilhado, que desenhou a lista no frame anterior.
+                int? levelRow = _editor.ShowLevelList ? _levelListRenderer.HitTestRow(mouse.X, mouse.Y) : null;
                 _editor.Update(Active, keyboard, mouse, GraphicsDevice.Viewport, brushButton, levelRow);
 
                 // Enter na lista pediu pra pular pra edição de outro nível: devolve as edições à
@@ -196,13 +199,16 @@ public class Game1 : Game
         }
 
         // Lista de níveis (M): modal do modo de jogo. Aberta, suspende todo o resto do input —
-        // W/S navega, Enter pula pro nível selecionado, M/Esc fecha. Espelha a lista do editor
-        // (L), mas só pra jogar. Fica antes do solver/movimento pra ser de fato modal.
+        // W/S (ou hover do mouse) navega, Enter/clique pula pro nível, M/Esc fecha. Usa o MESMO
+        // LevelListRenderer/hit-test do editor, então o mouse funciona igual nos dois modos. Fica
+        // antes do solver/movimento pra ser de fato modal.
         if (_levelBrowser.Visible)
         {
-            HandleLevelBrowser(keyboard);
+            int? hoverRow = _levelListRenderer.HitTestRow(mouse.X, mouse.Y);
+            HandleLevelBrowser(keyboard, mouse, hoverRow);
             _animationSystem.Update(Active, (float)gameTime.ElapsedGameTime.TotalSeconds);
             _previousKeyboard = keyboard;
+            _previousMouse = mouse;
             base.Update(gameTime);
             return;
         }
@@ -253,6 +259,7 @@ public class Game1 : Game
         {
             _levelBrowser.Open(_levelRepo, Active.LevelId);
             _previousKeyboard = keyboard;
+            _previousMouse = mouse;
             base.Update(gameTime);
             return;
         }
@@ -317,25 +324,44 @@ public class Game1 : Game
     }
 
     /// <summary>
-    /// Input da lista de níveis aberta (modal): W/S (ou setas, se houver) navegam; Enter pula
-    /// pro nível selecionado via navigator (mesma troca dos atalhos , .); M/Esc fecham. A troca
-    /// preserva as sessões no cache, como suspender — reentrar restaura o estado.
+    /// Input da lista de níveis aberta (modal): hover do mouse (com movimento) ou W/S navegam;
+    /// clique/Enter pula pro nível via navigator (mesma troca dos atalhos , .); M/Esc fecham. O
+    /// hover/clique espelham a lista do editor — mesma sensação nos dois modos. A troca preserva
+    /// as sessões no cache, como suspender.
     /// </summary>
-    private void HandleLevelBrowser(KeyboardState keyboard)
+    private void HandleLevelBrowser(KeyboardState keyboard, MouseState mouse, int? hoverRow)
     {
+        // Mouse: passar por cima seleciona (só quando o ponteiro move, pra não brigar com o
+        // teclado); clique vai direto pro nível.
+        if (hoverRow is int row)
+        {
+            if (mouse.X != _previousMouse.X || mouse.Y != _previousMouse.Y)
+                _levelBrowser.Select(row);
+            if (mouse.LeftButton == ButtonState.Pressed && _previousMouse.LeftButton == ButtonState.Released)
+            {
+                _levelBrowser.Select(row);
+                JumpToBrowserSelection();
+                return;
+            }
+        }
+
         if (Pressed(keyboard, Keys.W) || Pressed(keyboard, Keys.Up))
             _levelBrowser.MoveUp();
         else if (Pressed(keyboard, Keys.S) || Pressed(keyboard, Keys.Down))
             _levelBrowser.MoveDown();
 
         if (Pressed(keyboard, Keys.Enter))
-        {
-            if (_levelBrowser.SelectedId is int target)
-                _navigator.JumpTo(target);
-            _levelBrowser.Close();
-        }
+            JumpToBrowserSelection();
         else if (Pressed(keyboard, Keys.M) || Pressed(keyboard, Keys.Escape))
             _levelBrowser.Close();
+    }
+
+    /// <summary>Pula pro nível selecionado na lista e fecha o modal (preserva as sessões no cache).</summary>
+    private void JumpToBrowserSelection()
+    {
+        if (_levelBrowser.SelectedId is int target)
+            _navigator.JumpTo(target);
+        _levelBrowser.Close();
     }
 
     /// <summary>
@@ -406,9 +432,15 @@ public class Game1 : Game
         Matrix projection = _editorActive ? _editor.Projection : _camera.Projection;
         _renderSystem.Draw(Active, view, projection);
 
-        // Overlay do editor (cursor + HUD) por cima da cena.
+        // Overlay do editor (cursor + HUD) por cima da cena — mas com a lista aberta, ela é o
+        // modal e substitui os overlays de edição (desenhada pelo renderer compartilhado abaixo).
         if (_editorActive)
-            _editorRenderer.Draw(Active, _editor, view, projection);
+        {
+            if (_editor.ShowLevelList)
+                _levelListRenderer.Draw(_editor.LevelList, _editor.ListSelection, _editor.Working.Id, reorderable: true);
+            else
+                _editorRenderer.Draw(Active, _editor, view, projection);
+        }
         else
             DrawLevelHud();
 
@@ -416,9 +448,9 @@ public class Game1 : Game
         if (_solverActive)
             _solverRenderer.Draw(_solver);
 
-        // Lista de níveis (M) por cima de tudo: painel modal do modo de jogo.
+        // Lista de níveis do jogo (M): o MESMO renderer/hit-test do editor, sem reordenar.
         if (_levelBrowser.Visible)
-            _levelListRenderer.Draw(_levelBrowser, Active.LevelId);
+            _levelListRenderer.Draw(_levelBrowser.Items, _levelBrowser.Selection, Active.LevelId, reorderable: false);
 
         base.Draw(gameTime);
     }
