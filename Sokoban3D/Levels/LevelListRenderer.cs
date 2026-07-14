@@ -9,10 +9,8 @@ namespace Sokoban3D.Levels;
 /// Painel da lista de níveis — a ÚNICA fonte de desenho, usada pelo modo de jogo (tecla M) e pelo
 /// editor. Desenha id + nome + quadradinhos de mecânica, com a linha selecionada realçada e o
 /// nível atual marcado com <c>*</c>, e registra as caixas de clique de cada linha
-/// (<see cref="HitTestRow"/>) — então mouse e layout ficam idênticos nos dois modos. Só o
-/// <paramref name="reorderable"/> muda a dica (o editor reordena; o jogo não). Não guarda estado
-/// de lista: recebe itens/seleção de quem chama (<see cref="LevelBrowser"/> no jogo,
-/// <c>LevelEditor</c> no editor).
+/// (<see cref="HitTestRow"/>) — então mouse e layout ficam idênticos jogando ou editando. Não guarda
+/// estado de lista: recebe itens/seleção do <see cref="LevelBrowser"/> (dirigido pelo Game1).
 /// </summary>
 public class LevelListRenderer
 {
@@ -39,20 +37,15 @@ public class LevelListRenderer
         _pixel.SetData(new[] { Color.White });
     }
 
-    /// <summary>
-    /// Desenha o painel. <paramref name="currentId"/> ganha o <c>*</c>; <paramref name="reorderable"/>
-    /// acrescenta a dica de reordenar (só o editor).
-    /// </summary>
+    /// <summary>Desenha o painel. <paramref name="currentId"/> ganha o <c>*</c>.</summary>
     public void Draw(IReadOnlyList<(int Id, string Name, LevelBadges Badges)> items,
-        int selection, int currentId, bool reorderable)
+        int selection, int currentId)
     {
         _batch.Begin();
         float lh = _font.LineSpacing;
 
         const string header = "NIVEIS";
-        string hint = reorderable
-            ? "W/S: navegar   clique/Enter: ir   Shift+W/S: mover   M/Esc: fechar"
-            : "W/S: navegar   clique/Enter: ir   M/Esc: fechar";
+        const string hint = "W/S: navegar   clique/Enter: ir   Shift+W/S: mover   M/Esc: fechar";
 
         int badgeSize = Math.Max(8, (int)lh - 6);
         float reserve = _font.MeasureString("   ").X + 4 * (badgeSize + 4) + _font.MeasureString("  *").X;

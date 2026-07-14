@@ -28,6 +28,11 @@ public class Game1 : Game
     // Mouse do frame anterior, pra detecção de borda de clique e de movimento na lista de níveis.
     private MouseState _previousMouse;
 
+    // Reordenar/duplicar mexeu nos ids em disco → o cache de sessões do navigator ficou obsoleto.
+    // A reconstrução (Reload) é adiada pra próxima navegação (FreshJump), pra não resetar quem
+    // está no meio de um nível só por ter reordenado.
+    private bool _catalogDirty;
+
     // Editor de níveis: alterna com Tab. Enquanto ativo, os sistemas de jogo ficam pausados.
     private LevelEditor _editor;
     private EditorRenderer _editorRenderer;
@@ -130,14 +135,37 @@ public class Game1 : Game
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed)
             Exit();
 
-        // Modal do editor aberto (rename/lista): Esc/Tab ficam com o editor (fecham o modal),
-        // não trocam de modo aqui.
+        // Menu de listagem (M): o ÚNICO menu, aberto tanto jogando quanto editando. Enquanto
+        // visível é modal — captura todo o input (navega/reordena/escolhe) e a cena atrás (jogo
+        // ou editor) segue desenhada. Escolher um nível torna-o ativo (edita se você tava no
+        // editor via Tab; joga se tava jogando).
+        if (_levelBrowser.Visible)
+        {
+            HandleLevelMenu(keyboard, mouse);
+            _animationSystem.Update(Active, (float)gameTime.ElapsedGameTime.TotalSeconds);
+            _previousKeyboard = keyboard;
+            _previousMouse = mouse;
+            base.Update(gameTime);
+            return;
+        }
+        // M abre o menu de qualquer modo, menos durante o rename do editor ou o playback do solver.
+        if (Pressed(keyboard, Keys.M) && !(_editorActive && _editor.IsModal) && !_solverActive)
+        {
+            _levelBrowser.Open(_levelRepo, Active.LevelId);
+            _previousKeyboard = keyboard;
+            _previousMouse = mouse;
+            base.Update(gameTime);
+            return;
+        }
+
+        // Modal do editor aberto (rename): Esc/Tab ficam com o editor (fecham o modal), não trocam
+        // de modo aqui.
         bool editorModal = _editorActive && _editor.IsModal;
 
         // Tab alterna jogar/editar; Esc (já no editor e fora de modal) volta a jogar. Esc nunca
         // ENTRA no editor — só Tab. Mutuamente exclusivo com o solver (P).
         bool escLeavesEditor = _editorActive && !editorModal && Pressed(keyboard, Keys.Escape);
-        bool toggled = !_solverActive && !_levelBrowser.Visible && !editorModal && (Pressed(keyboard, Keys.Tab) || escLeavesEditor);
+        bool toggled = !_solverActive && !editorModal && (Pressed(keyboard, Keys.Tab) || escLeavesEditor);
         if (toggled)
         {
             _editorActive = !_editorActive;
@@ -145,9 +173,8 @@ public class Game1 : Game
                 _editor.Enter(Active, keyboard, mouse, GraphicsDevice.Viewport);
             else
             {
-                // Ao voltar a jogar: se o conjunto de ids mudou (reordenar/duplicar), o cache de
-                // sessões do navigator ficou obsoleto — grava o nível editado em disco (pra não
-                // perder edições no reset), reconstrói do disco e retoma nele.
+                // Ao voltar a jogar: se duplicou (mudou os ids em disco), grava o nível editado e
+                // marca o cache do navigator como obsoleto — o FreshJump reconstrói e retoma nele.
                 var editedLevel = _editor.Working;
                 int editedId = editedLevel?.Id ?? LevelCatalog.RootId;
                 _editor.Exit(Active);
@@ -155,58 +182,22 @@ public class Game1 : Game
                 {
                     if (editedLevel != null)
                         _levelRepo.Save(editedLevel);
-                    _navigator.Reload();
-                    _navigator.JumpTo(editedId);
+                    _catalogDirty = true;
                 }
+                if (_catalogDirty)
+                    FreshJump(editedId);
             }
         }
 
         if (_editorActive)
         {
-            // No editor os sistemas de jogo ficam pausados; só o editor processa input.
+            // No editor os sistemas de jogo ficam pausados; só o editor processa input. O editor
+            // faz o próprio picking; daqui vai só o botão de brush do HUD sob o ponteiro.
             if (!toggled)
             {
-                // O editor faz o próprio picking (raycast contra a cena); daqui vai só a câmera
-                // e o botão de brush do HUD sob o ponteiro (null se não estiver sobre nenhum).
                 var brushButton = _editorRenderer.HitTestBrush(mouse.X, mouse.Y);
-                // Com a lista aberta, também resolve a linha sob o ponteiro (pra hover/clique).
-                // O hit-test vem do renderer compartilhado, que desenhou a lista no frame anterior.
-                int? levelRow = _editor.ShowLevelList ? _levelListRenderer.HitTestRow(mouse.X, mouse.Y) : null;
-                _editor.Update(Active, keyboard, mouse, GraphicsDevice.Viewport, brushButton, levelRow);
-
-                // Enter na lista pediu pra pular pra edição de outro nível: devolve as edições à
-                // sessão atual, troca a sessão ativa pelo navigator (pilha/identidade corretas) e
-                // reabre o editor na nova sessão. Assim testar e concluir a meta volta pro pai.
-                if (_editor.TakePendingJump() is int jumpId)
-                {
-                    // Reordenou/duplicou antes de pular: grava o nível editado (pra não perder
-                    // edições no reset) e reconstrói o navigator do disco antes de saltar pro alvo.
-                    var editedLevel = _editor.Working;
-                    _editor.Exit(Active);
-                    if (_editor.ConsumeCatalogChanged())
-                    {
-                        if (editedLevel != null)
-                            _levelRepo.Save(editedLevel);
-                        _navigator.Reload();
-                    }
-                    _navigator.JumpTo(jumpId);
-                    _editor.Enter(Active, keyboard, mouse, GraphicsDevice.Viewport);
-                }
+                _editor.Update(Active, keyboard, mouse, GraphicsDevice.Viewport, brushButton);
             }
-            _previousKeyboard = keyboard;
-            base.Update(gameTime);
-            return;
-        }
-
-        // Lista de níveis (M): modal do modo de jogo. Aberta, suspende todo o resto do input —
-        // W/S (ou hover do mouse) navega, Enter/clique pula pro nível, M/Esc fecha. Usa o MESMO
-        // LevelListRenderer/hit-test do editor, então o mouse funciona igual nos dois modos. Fica
-        // antes do solver/movimento pra ser de fato modal.
-        if (_levelBrowser.Visible)
-        {
-            int? hoverRow = _levelListRenderer.HitTestRow(mouse.X, mouse.Y);
-            HandleLevelBrowser(keyboard, mouse, hoverRow);
-            _animationSystem.Update(Active, (float)gameTime.ElapsedGameTime.TotalSeconds);
             _previousKeyboard = keyboard;
             _previousMouse = mouse;
             base.Update(gameTime);
@@ -249,17 +240,6 @@ public class Game1 : Game
             PressurePlateSystem.Resolve(Active);
             _animationSystem.Update(Active, dt);
             _previousKeyboard = keyboard;
-            base.Update(gameTime);
-            return;
-        }
-
-        // M abre a lista de níveis (modal tratado no topo). Só no modo de jogo puro — aqui já se
-        // passou dos ramos de editor e solver.
-        if (Pressed(keyboard, Keys.M))
-        {
-            _levelBrowser.Open(_levelRepo, Active.LevelId);
-            _previousKeyboard = keyboard;
-            _previousMouse = mouse;
             base.Update(gameTime);
             return;
         }
@@ -324,15 +304,16 @@ public class Game1 : Game
     }
 
     /// <summary>
-    /// Input da lista de níveis aberta (modal): hover do mouse (com movimento) ou W/S navegam;
-    /// clique/Enter pula pro nível via navigator (mesma troca dos atalhos , .); M/Esc fecham. O
-    /// hover/clique espelham a lista do editor — mesma sensação nos dois modos. A troca preserva
-    /// as sessões no cache, como suspender.
+    /// Input do menu de listagem aberto (modal, o mesmo jogando ou editando): hover do mouse (com
+    /// movimento) ou W/S navegam; Shift+W/S reordena; clique/Enter escolhe (torna o nível ativo);
+    /// M/Esc fecham.
     /// </summary>
-    private void HandleLevelBrowser(KeyboardState keyboard, MouseState mouse, int? hoverRow)
+    private void HandleLevelMenu(KeyboardState keyboard, MouseState mouse)
     {
+        int? hoverRow = _levelListRenderer.HitTestRow(mouse.X, mouse.Y);
+
         // Mouse: passar por cima seleciona (só quando o ponteiro move, pra não brigar com o
-        // teclado); clique vai direto pro nível.
+        // teclado); clique escolhe.
         if (hoverRow is int row)
         {
             if (mouse.X != _previousMouse.X || mouse.Y != _previousMouse.Y)
@@ -340,28 +321,88 @@ public class Game1 : Game
             if (mouse.LeftButton == ButtonState.Pressed && _previousMouse.LeftButton == ButtonState.Released)
             {
                 _levelBrowser.Select(row);
-                JumpToBrowserSelection();
+                ChooseLevel();
                 return;
             }
         }
 
+        // W/S navega; Shift+W/S reordena (troca ids em disco).
+        bool shift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
         if (Pressed(keyboard, Keys.W) || Pressed(keyboard, Keys.Up))
-            _levelBrowser.MoveUp();
+        {
+            if (shift) ReorderSelected(-1); else _levelBrowser.MoveUp();
+        }
         else if (Pressed(keyboard, Keys.S) || Pressed(keyboard, Keys.Down))
-            _levelBrowser.MoveDown();
+        {
+            if (shift) ReorderSelected(+1); else _levelBrowser.MoveDown();
+        }
 
         if (Pressed(keyboard, Keys.Enter))
-            JumpToBrowserSelection();
+            ChooseLevel();
         else if (Pressed(keyboard, Keys.M) || Pressed(keyboard, Keys.Escape))
             _levelBrowser.Close();
     }
 
-    /// <summary>Pula pro nível selecionado na lista e fecha o modal (preserva as sessões no cache).</summary>
-    private void JumpToBrowserSelection()
+    /// <summary>
+    /// Escolher um nível: fecha o menu e torna o nível ativo. No editor, sai pro jogo (Tab pra
+    /// editar depois), gravando/reconstruindo se o catálogo mudou. O FreshJump reconstrói o cache
+    /// do navigator se um reorder o deixou obsoleto.
+    /// </summary>
+    private void ChooseLevel()
     {
-        if (_levelBrowser.SelectedId is int target)
-            _navigator.JumpTo(target);
+        if (_levelBrowser.SelectedId is not int id)
+        {
+            _levelBrowser.Close();
+            return;
+        }
         _levelBrowser.Close();
+
+        if (_editorActive)
+        {
+            var editedLevel = _editor.Working;
+            _editor.Exit(Active);
+            _editorActive = false;
+            if (_editor.ConsumeCatalogChanged())
+            {
+                if (editedLevel != null)
+                    _levelRepo.Save(editedLevel);
+                _catalogDirty = true;
+            }
+        }
+        FreshJump(id);
+    }
+
+    /// <summary>
+    /// Reordena: troca o nível selecionado com o vizinho (ids em disco via
+    /// <see cref="LevelRepository.SwapIds"/>), remonta o menu e marca o cache do navigator pra
+    /// reconstruir na próxima navegação.
+    /// </summary>
+    private void ReorderSelected(int dir)
+    {
+        var items = _levelBrowser.Items;
+        int i = _levelBrowser.Selection, j = i + dir;
+        if (j < 0 || j >= items.Count)
+            return;
+
+        _levelRepo.SwapIds(items[i].Id, items[j].Id);
+        _catalogDirty = true;
+        _levelBrowser.Refresh(_levelRepo);
+        _levelBrowser.Select(j); // a seleção segue o item movido
+    }
+
+    /// <summary>
+    /// Navega pro nível <paramref name="id"/>, reconstruindo antes o cache do navigator se um
+    /// reorder/duplicar o deixou obsoleto (<see cref="_catalogDirty"/>). Fonte única de troca de
+    /// nível — usada pelo menu, pelos atalhos , . e pela saída do editor.
+    /// </summary>
+    private void FreshJump(int id)
+    {
+        if (_catalogDirty)
+        {
+            _navigator.Reload();
+            _catalogDirty = false;
+        }
+        _navigator.JumpTo(id);
     }
 
     /// <summary>
@@ -379,7 +420,7 @@ public class Game1 : Game
         if (idx < 0)
             idx = 0;
 
-        _navigator.JumpTo(ids[(idx + step + ids.Count) % ids.Count]);
+        FreshJump(ids[(idx + step + ids.Count) % ids.Count]);
     }
 
     private void ReframeCamera()
@@ -432,25 +473,23 @@ public class Game1 : Game
         Matrix projection = _editorActive ? _editor.Projection : _camera.Projection;
         _renderSystem.Draw(Active, view, projection);
 
-        // Overlay do editor (cursor + HUD) por cima da cena — mas com a lista aberta, ela é o
-        // modal e substitui os overlays de edição (desenhada pelo renderer compartilhado abaixo).
+        // Overlay do editor (cursor + HUD) por cima da cena — escondido quando o menu de listagem
+        // está aberto (ele é o modal por cima de tudo).
         if (_editorActive)
         {
-            if (_editor.ShowLevelList)
-                _levelListRenderer.Draw(_editor.LevelList, _editor.ListSelection, _editor.Working.Id, reorderable: true);
-            else
+            if (!_levelBrowser.Visible)
                 _editorRenderer.Draw(Active, _editor, view, projection);
         }
-        else
+        else if (!_levelBrowser.Visible)
             DrawLevelHud();
 
         // HUD do solver-playback por cima da cena.
         if (_solverActive)
             _solverRenderer.Draw(_solver);
 
-        // Lista de níveis do jogo (M): o MESMO renderer/hit-test do editor, sem reordenar.
+        // Menu de listagem (M): o modal único, por cima de tudo — jogando ou editando.
         if (_levelBrowser.Visible)
-            _levelListRenderer.Draw(_levelBrowser.Items, _levelBrowser.Selection, Active.LevelId, reorderable: false);
+            _levelListRenderer.Draw(_levelBrowser.Items, _levelBrowser.Selection, Active.LevelId);
 
         base.Draw(gameTime);
     }

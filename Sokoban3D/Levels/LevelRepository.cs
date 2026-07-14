@@ -30,6 +30,22 @@ public class LevelRepository
 
     public void Save(Level level) => LevelSerializer.Save(level, PathFor(level.Id));
 
+    /// <summary>
+    /// Troca as identidades (ids/arquivos) de dois níveis — a operação de reordenar. O conteúdo
+    /// de cada um passa a morar no arquivo do outro; os portais NÃO são remapeados (mantêm o número
+    /// que apontavam). Opera só em disco: quem tiver o cache de sessões (navigator) precisa
+    /// reconstruir depois.
+    /// </summary>
+    public void SwapIds(int idA, int idB)
+    {
+        var a = Load(idA);
+        var b = Load(idB);
+        a.Id = idB;
+        b.Id = idA;
+        Save(a);
+        Save(b);
+    }
+
     /// <summary>Ids de todos os mapas presentes no diretório (pela convenção level_&lt;id&gt;.json).</summary>
     public IEnumerable<int> ListIds()
     {
