@@ -37,11 +37,6 @@ public class MovementSystem
     // de entrada e saída — usadas pra montar a animação de teleporte. Reusado a cada jogada.
     private readonly Dictionary<Entity, (Vector3 Entry, Vector3 Exit)> _teleported = new();
 
-    // True se algum PushInto da jogada atual de fato mutou o mundo (moveu ou quebrou uma caixa).
-    // As jogadas de corpo magnético usam isto pra saber se uma tentativa TRAVADA chegou a mexer
-    // em algo — se sim, ainda é um turno de verdade (gravidade + histórico).
-    private bool _pushMutated;
-
     // Frágeis armadas no início do turno atual (peça repousando em cima de cada uma), capturadas
     // junto do Snapshot e conferidas no SettleAndCommit (ver Core.Fragility).
     private List<(Entity Box, Entity Loader)> _fragileLoads = new();
@@ -190,9 +185,13 @@ public class MovementSystem
     /// olhar (frente ou ré). O corpo inteiro é erguido do grid primeiro — o movimento é simultâneo
     /// e o destino de uma peça costuma ser a célula que outra está liberando —, então cada peça
     /// resolve sua célula nova com o PushInto (livre, empurrando, quebrando frágil). Qualquer peça
-    /// bloqueada trava o corpo inteiro. Portal não passa o PLAYER grudado (redirecionamento nele
-    /// conta como bloqueio), mas uma CAIXA do corpo atravessa: assenta do lado oposto da parceira
-    /// e, longe do player, o grude derivado se desfaz sozinho — o portal desprende a caixa.
+    /// bloqueada trava o corpo inteiro. Portal é transparente às caixas do corpo: quem entra
+    /// assenta do lado oposto da parceira e, longe do resto do corpo, o grude derivado se
+    /// desfaz sozinho — é assim que o portal desprende uma caixa presa. O PLAYER só atravessa
+    /// se TODA magnética restante for trailing (ia só seguir pra célula que ele libera de
+    /// qualquer forma, sem portal envolvido pra ela) — com alguma rígida na frente ou lateral,
+    /// o portal barra o player como qualquer obstáculo, senão o corpo se partiria de um jeito
+    /// que não é a forma legítima de soltar uma magnética (ver <see cref="Magnetism"/>).
     /// </summary>
     private void TryMoveBody(Entity player, GridPosition pos, List<(Entity Box, int Ox, int Oz)> magnets, int dx, int dz)
     {
@@ -224,7 +223,6 @@ public class MovementSystem
 
         var before = Snapshot();
         _teleported.Clear();
-        _pushMutated = false;
 
         _world.Vacate(player);
         foreach (var (box, _, _) in magnets)
@@ -237,6 +235,13 @@ public class MovementSystem
         foreach (var (box, ox, oz) in magnets)
             pieces.Add((box, new GridPosition(pos.X + ox + dx, pos.Y, pos.Z + oz + dz), true));
 
+        // O player só pode atravessar um portal se toda magnética restante for trailing: aí ela
+        // ia seguir pra célula que ele libera de qualquer forma (nenhum portal no caminho dela),
+        // e o teleporte do player só apressa o desprendimento que já ia acontecer. Com alguma
+        // rígida na frente ou lateral, ela precisaria "atravessar junto" pra manter o corpo — o
+        // que não é suportado —, então o portal barra o player como qualquer obstáculo.
+        bool allMagnetsTrailing = magnets.TrueForAll(m => m.Ox == -dx && m.Oz == -dz);
+
         var landings = new List<(Entity E, GridPosition To, GridPosition Landing)>();
         bool ok = true;
         foreach (var (e, to, isCargo) in pieces)
@@ -244,10 +249,10 @@ public class MovementSystem
             var landing = PushInto(to.X, to.Y, to.Z, dx, dz, PlayerPushStrength, new HashSet<Entity>(), direct: true, cargo: isCargo);
             bool redirected = landing is not null
                 && (landing.Value.X != to.X || landing.Value.Y != to.Y || landing.Value.Z != to.Z);
-            // Redirecionamento de portal: barra o player (portal não passa o corpo em volta dele),
-            // mas uma caixa do corpo atravessa e assenta na saída da parceira. Duas peças não
-            // podem assentar na MESMA célula — colisão só possível via teleporte, e trava o corpo.
-            if (landing is null || (redirected && !isCargo)
+            // Duas peças não podem assentar na MESMA célula — colisão só possível via
+            // teleporte, e trava o corpo inteiro.
+            if (landing is null
+                || (redirected && !isCargo && !allMagnetsTrailing)
                 || landings.Exists(l => l.Landing.X == landing.Value.X && l.Landing.Y == landing.Value.Y && l.Landing.Z == landing.Value.Z))
             {
                 ok = false;
@@ -258,12 +263,10 @@ public class MovementSystem
 
         if (!ok)
         {
-            // Corpo travado: todo mundo volta a ocupar onde estava. O que uma peça JÁ empurrou
-            // antes do bloqueio fica empurrado — se algo mudou, ainda é um turno.
-            foreach (var (e, _, _) in pieces)
-                _world.Occupy(e);
-            if (_pushMutated)
-                SettleAndCommit(player, before);
+            // Corpo travado: desfaz TUDO, inclusive qualquer empurrão em cadeia que uma peça
+            // anterior já tenha feito antes do bloqueio (ver RollbackAttempt) — jogada impossível
+            // não deixa rastro nenhum, nem parcial.
+            RollbackAttempt(before);
             return;
         }
 
@@ -285,9 +288,11 @@ public class MovementSystem
     /// Giro do corpo rígido: comando perpendicular ao olhar. O player não muda de célula; cada
     /// caixa grudada varre um quarto de volta ao redor dele — da célula atual até a girada,
     /// passando pela diagonal — empurrando o que estiver no caminho na direção tangente do arco.
-    /// Parede ou peça imóvel em qualquer célula varrida trava o giro inteiro (o olhar não muda),
-    /// mas o que a varredura JÁ empurrou fica empurrado. Como as caixas do corpo mudam de célula,
-    /// um giro bem-sucedido é sempre um turno de verdade (gravidade + histórico). Portal em célula
+    /// Parede ou peça imóvel em qualquer célula varrida trava o giro inteiro (o olhar não muda) —
+    /// mesmo o que a varredura já tinha empurrado em cadeia antes do bloqueio é desfeito (ver
+    /// <see cref="RollbackAttempt"/>), giro travado não deixa rastro. Um giro bem-sucedido é sempre
+    /// um turno de verdade (gravidade + histórico), já que as caixas do corpo mudam de célula.
+    /// Portal em célula
     /// varrida teleporta a caixa: ela sai pela parceira (na tangente se o portal está na diagonal,
     /// em -offset se está no destino), assenta lá e o grude derivado se desfaz — o player fica
     /// onde está e só o olhar gira.
@@ -320,7 +325,6 @@ public class MovementSystem
 
         var before = Snapshot();
         _teleported.Clear();
-        _pushMutated = false;
 
         // Giro simultâneo: ergue as caixas do corpo antes, pra célula antiga de uma não bloquear
         // a varredura da outra.
@@ -381,12 +385,10 @@ public class MovementSystem
 
         if (!ok)
         {
-            // Giro travado: as caixas voltam a ocupar onde estavam (não chegaram a mudar de
-            // célula). O que a varredura já empurrou fica — se algo mudou, ainda é um turno.
-            foreach (var (box, _, _) in magnets)
-                _world.Occupy(box);
-            if (_pushMutated)
-                SettleAndCommit(player, before);
+            // Giro travado: desfaz TUDO, inclusive qualquer empurrão em cadeia que a varredura já
+            // tenha feito antes do bloqueio (ver RollbackAttempt) — jogada impossível não deixa
+            // rastro nenhum, nem parcial.
+            RollbackAttempt(before);
             return;
         }
 
@@ -406,6 +408,37 @@ public class MovementSystem
         _world.World.Set(player, new Facing { Dx = dx, Dz = dz });
 
         SettleAndCommit(player, before);
+    }
+
+    /// <summary>
+    /// Desfaz uma tentativa de corpo rígido (translação ou giro) que travou no meio do caminho:
+    /// qualquer peça do <paramref name="before"/> — não só player/magnéticas, TODA peça reversível
+    /// do nível — que mudou de célula ou perdeu <see cref="Solid"/> (empurrão em cadeia ou frágil
+    /// quebrada por uma peça do corpo antes do bloqueio) volta pro estado do snapshot. Sem isso,
+    /// PushInto já teria mutado o mundo direto (<c>_world.Move</c>/<c>Remove&lt;Solid&gt;</c>) assim
+    /// que uma peça anterior resolveu, mesmo a jogada inteira sendo recusada depois. Mesmo padrão
+    /// de duas fases do <see cref="Core.History.Undo"/>: vaca o lote inteiro ANTES de reposicionar
+    /// qualquer uma, senão o Vacate de uma restauraria por cima da célula que outra estava ocupando.
+    /// Jogada impossível não deixa rastro nenhum, nem parcial — por isso não chama SettleAndCommit
+    /// (não há turno a gravar).
+    /// </summary>
+    private void RollbackAttempt(Dictionary<Entity, (GridPosition Pos, bool Solid, Facing? Face)> before)
+    {
+        foreach (var (e, _) in before)
+            if (_world.World.Has<Solid>(e))
+                _world.Vacate(e);
+
+        foreach (var (e, snap) in before)
+        {
+            if (snap.Solid && !_world.World.Has<Solid>(e))
+                _world.World.Add(e, new Solid());
+            else if (!snap.Solid && _world.World.Has<Solid>(e))
+                _world.World.Remove<Solid>(e);
+
+            _world.World.Set(e, snap.Pos);
+            if (snap.Solid)
+                _world.Occupy(e);
+        }
     }
 
     /// <summary>
@@ -589,7 +622,6 @@ public class MovementSystem
             // havia um portal lá). A verde move normalmente; o CommitTurn não a grava (excluída do
             // snapshot), então o undo não a reverte — só o R.
             _world.Move(occ, boxLanding.Value);
-            _pushMutated = true;
             return new GridPosition(x, y, z); // quem vinha ocupa a célula liberada
         }
 
@@ -648,7 +680,6 @@ public class MovementSystem
         }
 
         _world.Move(occ, new GridPosition(anchor.X + dx, anchor.Y, anchor.Z + dz));
-        _pushMutated = true;
         return new GridPosition(qx, qy, qz);
     }
 
@@ -796,7 +827,6 @@ public class MovementSystem
     {
         _world.Vacate(entity);
         _world.World.Remove<Solid>(entity);
-        _pushMutated = true;
     }
 
     /// <summary>

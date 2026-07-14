@@ -15,9 +15,12 @@ namespace Sokoban3D.Core;
 /// (<see cref="Gravity"/> — o grude a segura pairando sobre buracos). Duas formas de soltar:
 /// o player anda na direção OPOSTA à caixa enquanto algo a retém no lugar (<see cref="Restraints"/>
 /// — sticky, trilho...) — ela fica pra trás, a adjacência quebra e o grude se desfaz sozinho —
-/// ou a caixa do corpo entra num portal (na translação ou varrida pelo giro): ela atravessa
-/// (o player não) e assenta na saída da parceira, longe demais pra adjacência (a menos que a
-/// saída caia colada no player, quando o grude re-deriva na hora).
+/// ou a caixa do corpo entra num portal (na translação ou varrida pelo giro): ela atravessa e
+/// assenta na saída da parceira, longe demais pra adjacência (a menos que a saída caia colada
+/// no player, quando o grude re-deriva na hora). O player também pode atravessar, mas só na
+/// translação e só se a magnética for TRAILING (atrás do passo) — o mesmo caso em que ela já
+/// se soltaria sozinha se estivesse retida; com ela rígida na frente ou lateral, o portal barra
+/// o player como qualquer obstáculo (ver <see cref="ECS.Systems.MovementSystem"/>).
 /// </summary>
 public static class Magnetism
 {
