@@ -31,6 +31,7 @@ project.assets.json
 *.nuget.targets
 
 # ---- Test / coverage ----
+*.moves
 [Tt]est[Rr]esult*/
 *.coverage
 *.coveragexml
