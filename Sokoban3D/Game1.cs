@@ -135,13 +135,13 @@ public class Game1 : Game
                 _editor.Enter(Active, keyboard, mouse, GraphicsDevice.Viewport);
             else
             {
-                // Ao voltar a jogar: se houve reordenação de ids, o cache de sessões do navigator
-                // ficou obsoleto — grava o nível editado em disco (pra não perder edições no
-                // reset), reconstrói do disco e retoma nele.
+                // Ao voltar a jogar: se o conjunto de ids mudou (reordenar/duplicar), o cache de
+                // sessões do navigator ficou obsoleto — grava o nível editado em disco (pra não
+                // perder edições no reset), reconstrói do disco e retoma nele.
                 var editedLevel = _editor.Working;
                 int editedId = editedLevel?.Id ?? LevelCatalog.RootId;
                 _editor.Exit(Active);
-                if (_editor.ConsumeRepoReordered())
+                if (_editor.ConsumeCatalogChanged())
                 {
                     if (editedLevel != null)
                         _levelRepo.Save(editedLevel);
@@ -168,11 +168,11 @@ public class Game1 : Game
                 // reabre o editor na nova sessão. Assim testar e concluir a meta volta pro pai.
                 if (_editor.TakePendingJump() is int jumpId)
                 {
-                    // Reordenou antes de pular: grava o nível editado (pra não perder edições no
-                    // reset) e reconstrói o navigator do disco antes de saltar pro alvo.
+                    // Reordenou/duplicou antes de pular: grava o nível editado (pra não perder
+                    // edições no reset) e reconstrói o navigator do disco antes de saltar pro alvo.
                     var editedLevel = _editor.Working;
                     _editor.Exit(Active);
-                    if (_editor.ConsumeRepoReordered())
+                    if (_editor.ConsumeCatalogChanged())
                     {
                         if (editedLevel != null)
                             _levelRepo.Save(editedLevel);

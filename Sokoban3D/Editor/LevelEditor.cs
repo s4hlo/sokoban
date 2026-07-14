@@ -95,10 +95,10 @@ public class LevelEditor
     // Update. Não trocamos a sessão aqui dentro: quem faz é o navigator, senão o nível pulado
     // viraria a raiz da pilha e concluir a meta não voltaria pro pai.
     private int? _pendingJump;
-    // Houve reordenação (troca de ids em disco) nesta sessão de edição? O Game1 consome ao sair
-    // ou pular pra reconstruir a navegação — o cache do navigator é por id e vira obsoleto. Não
-    // é resetado no Enter: precisa sobreviver ao Enter da lista (que reabre o editor).
-    private bool _repoReordered;
+    // O conjunto de ids em disco mudou nesta sessão de edição (reordenar ou duplicar)? O Game1
+    // consome ao sair ou pular pra reconstruir a navegação — o cache do navigator é por id e vira
+    // obsoleto. Não é resetado no Enter: precisa sobreviver ao Enter da lista (que reabre o editor).
+    private bool _catalogChanged;
 
     // ----- Estado exposto pro renderer -----
     public int CursorX { get; private set; }
@@ -516,18 +516,19 @@ public class LevelEditor
             IsDirty = false;
 
         // O catálogo em disco mudou de forma: o Game1 vai reconstruir a navegação ao sair/pular.
-        _repoReordered = true;
+        _catalogChanged = true;
         Log.Information("Editor: niveis {A} e {B} reordenados (ids trocados)", idA, idB);
     }
 
     /// <summary>
-    /// Consome (e limpa) o sinal de que houve reordenação de ids em disco. O Game1 chama nos
-    /// handoffs editor→jogo pra reconstruir a navegação (<see cref="LevelNavigator.Reload"/>).
+    /// Consome (e limpa) o sinal de que o conjunto de ids em disco mudou (reordenar/duplicar). O
+    /// Game1 chama nos handoffs editor→jogo pra reconstruir a navegação
+    /// (<see cref="LevelNavigator.Reload"/>), senão o cache por id do navigator fica obsoleto.
     /// </summary>
-    public bool ConsumeRepoReordered()
+    public bool ConsumeCatalogChanged()
     {
-        var v = _repoReordered;
-        _repoReordered = false;
+        var v = _catalogChanged;
+        _catalogChanged = false;
         return v;
     }
 
@@ -1460,6 +1461,9 @@ public class LevelEditor
         PushUndo();
         _working.Id = NextFreeId();
         SaveToDisk();
+        // Novo id em disco + a sessão ativa mudou de identidade: o Game1 reconstrói a navegação
+        // ao sair/pular, senão o cache por id do navigator desincroniza (< > e portais quebram).
+        _catalogChanged = true;
         SetStatus($"Duplicado como nivel {_working.Id} — editando a copia");
         Log.Information("Editor: nivel duplicado para {Id}", _working.Id);
     }
