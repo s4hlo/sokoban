@@ -39,6 +39,11 @@ public class Game1 : Game
     private SolverRenderer _solverRenderer;
     private bool _solverActive;
 
+    // Lista de níveis do modo de jogo (tecla M): modal pra navegar e pular pra outro nível sem
+    // entrar no editor. Enquanto aberta, o input do player fica suspenso (W/S navega, Enter vai).
+    private LevelBrowser _levelBrowser;
+    private LevelListRenderer _levelListRenderer;
+
     // Gravador de certificado (dev tool): acumula as ações da tentativa atual e, na vitória,
     // salva Solutions/level_N.moves pro oráculo de solvabilidade (se ainda não existir).
     private SolutionRecorder _recorder;
@@ -88,6 +93,8 @@ public class Game1 : Game
         // regras reais, sem segunda cópia pra divergir.
         _solver = new SolverTool(_levelManager, _movementSystem);
 
+        _levelBrowser = new LevelBrowser();
+
         Log.Information("Game initialized");
 
         base.Initialize();
@@ -104,6 +111,7 @@ public class Game1 : Game
         _hudBatch = new SpriteBatch(GraphicsDevice);
         _editorRenderer = new EditorRenderer(GraphicsDevice, cubes, _hudFont);
         _solverRenderer = new SolverRenderer(GraphicsDevice, _hudFont);
+        _levelListRenderer = new LevelListRenderer(GraphicsDevice, _hudFont);
 
         // Começa na raiz da árvore de níveis (um nível como qualquer outro). O navigator
         // dispara LevelChanged, que reposiciona a câmera.
@@ -127,7 +135,7 @@ public class Game1 : Game
         // Tab alterna jogar/editar; Esc (já no editor e fora de modal) volta a jogar. Esc nunca
         // ENTRA no editor — só Tab. Mutuamente exclusivo com o solver (P).
         bool escLeavesEditor = _editorActive && !editorModal && Pressed(keyboard, Keys.Escape);
-        bool toggled = !_solverActive && !editorModal && (Pressed(keyboard, Keys.Tab) || escLeavesEditor);
+        bool toggled = !_solverActive && !_levelBrowser.Visible && !editorModal && (Pressed(keyboard, Keys.Tab) || escLeavesEditor);
         if (toggled)
         {
             _editorActive = !_editorActive;
@@ -187,6 +195,18 @@ public class Game1 : Game
             return;
         }
 
+        // Lista de níveis (M): modal do modo de jogo. Aberta, suspende todo o resto do input —
+        // W/S navega, Enter pula pro nível selecionado, M/Esc fecha. Espelha a lista do editor
+        // (L), mas só pra jogar. Fica antes do solver/movimento pra ser de fato modal.
+        if (_levelBrowser.Visible)
+        {
+            HandleLevelBrowser(keyboard);
+            _animationSystem.Update(Active, (float)gameTime.ElapsedGameTime.TotalSeconds);
+            _previousKeyboard = keyboard;
+            base.Update(gameTime);
+            return;
+        }
+
         // P alterna o solver-playback (dev tool). Ao entrar, o nível reseta pro estado de
         // receita (o solver resolve a partir do zero) e a solução executa sozinha.
         // C é o irmão do P: mesmo playback, mas tocando o CERTIFICADO gravado
@@ -222,6 +242,16 @@ public class Game1 : Game
             _solver.Update(Active, dt);
             PressurePlateSystem.Resolve(Active);
             _animationSystem.Update(Active, dt);
+            _previousKeyboard = keyboard;
+            base.Update(gameTime);
+            return;
+        }
+
+        // M abre a lista de níveis (modal tratado no topo). Só no modo de jogo puro — aqui já se
+        // passou dos ramos de editor e solver.
+        if (Pressed(keyboard, Keys.M))
+        {
+            _levelBrowser.Open(_levelRepo, Active.LevelId);
             _previousKeyboard = keyboard;
             base.Update(gameTime);
             return;
@@ -284,6 +314,28 @@ public class Game1 : Game
         _previousKeyboard = keyboard;
 
         base.Update(gameTime);
+    }
+
+    /// <summary>
+    /// Input da lista de níveis aberta (modal): W/S (ou setas, se houver) navegam; Enter pula
+    /// pro nível selecionado via navigator (mesma troca dos atalhos , .); M/Esc fecham. A troca
+    /// preserva as sessões no cache, como suspender — reentrar restaura o estado.
+    /// </summary>
+    private void HandleLevelBrowser(KeyboardState keyboard)
+    {
+        if (Pressed(keyboard, Keys.W) || Pressed(keyboard, Keys.Up))
+            _levelBrowser.MoveUp();
+        else if (Pressed(keyboard, Keys.S) || Pressed(keyboard, Keys.Down))
+            _levelBrowser.MoveDown();
+
+        if (Pressed(keyboard, Keys.Enter))
+        {
+            if (_levelBrowser.SelectedId is int target)
+                _navigator.JumpTo(target);
+            _levelBrowser.Close();
+        }
+        else if (Pressed(keyboard, Keys.M) || Pressed(keyboard, Keys.Escape))
+            _levelBrowser.Close();
     }
 
     /// <summary>
@@ -364,6 +416,10 @@ public class Game1 : Game
         if (_solverActive)
             _solverRenderer.Draw(_solver);
 
+        // Lista de níveis (M) por cima de tudo: painel modal do modo de jogo.
+        if (_levelBrowser.Visible)
+            _levelListRenderer.Draw(_levelBrowser, Active.LevelId);
+
         base.Draw(gameTime);
     }
 
@@ -380,7 +436,7 @@ public class Game1 : Game
 
         _hudBatch.Begin();
         DrawShadowed(label, new Vector2(16, 12), Color.White);
-        DrawShadowed("< > troca nivel", new Vector2(16, 12 + _hudFont.LineSpacing), Color.LightGray * 0.8f);
+        DrawShadowed("< > troca nivel   M lista", new Vector2(16, 12 + _hudFont.LineSpacing), Color.LightGray * 0.8f);
         _hudBatch.End();
     }
 

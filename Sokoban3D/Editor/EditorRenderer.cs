@@ -116,7 +116,7 @@ public class EditorRenderer
     }
 
     /// <summary>
-    /// Painel da lista de níveis (tecla L): id + nome de cada nível na ordem dos ids, com a linha
+    /// Painel da lista de níveis (tecla L ou M): id + nome de cada nível na ordem dos ids, com a linha
     /// selecionada realçada e o nível em edição marcado. W/S navega, Shift+W/S troca o selecionado
     /// de posição (reordena os ids), Enter/clique vai pro nível. As linhas são clicáveis (hitboxes
     /// preenchidas aqui, consumidas por <see cref="HitTestLevelRow"/>).
@@ -128,7 +128,7 @@ public class EditorRenderer
         var list = editor.LevelList;
 
         const string header = "NIVEIS";
-        const string hint = "W/S: navegar   clique/Enter: ir   Shift+W/S: mover   L/Esc: fechar";
+        const string hint = "W/S: navegar   clique/Enter: ir   Shift+W/S: mover   M/L/Esc: fechar";
 
         float width = Math.Max(_font.MeasureString(header).X, _font.MeasureString(hint).X);
         foreach (var (id, name) in list)
@@ -583,7 +583,7 @@ public class EditorRenderer
             ("Ctrl+N", TextColor), (" novo   ", HintColor),
             ("Ctrl+D", TextColor), (" duplica   ", HintColor),
             ("R", TextColor), (" renomeia   ", HintColor),
-            ("L", TextColor), (" lista/ordena   ", HintColor),
+            ("L/M", TextColor), (" lista/ordena   ", HintColor),
             ("V", TextColor), (" valida   ", HintColor),
             ("G", TextColor), (" grade   ", HintColor),
             ("H", TextColor), (" ajuda", HintColor),

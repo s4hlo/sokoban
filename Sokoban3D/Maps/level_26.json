@@ -1,6 +1,6 @@
 {
-  "Name": "portal_sc",
-  "Id": 5,
+  "Name": "Placas",
+  "Id": 26,
   "Width": 6, "Height": 4, "Depth": 3,
   "Players": [
     [0, 1, 0]
