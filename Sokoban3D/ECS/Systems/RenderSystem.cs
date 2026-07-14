@@ -45,7 +45,7 @@ public class RenderSystem
     private static readonly Color RailArmColor = new(205, 210, 220);
     // Bloco toggle: cubo roxo quando sólido; tile fino (pegada) quando aberto, pra anteceder
     // onde ele vai aparecer.
-    private static readonly Color ToggleSolidColor = new(130, 80, 190);
+    public static readonly Color ToggleSolidColor = new(130, 80, 190);
     private static readonly Color ToggleOpenColor = new(80, 55, 110);
 
     // Cor por tipo de caixa: leve clara, média intermediária, pesada escura, frágil avermelhada.

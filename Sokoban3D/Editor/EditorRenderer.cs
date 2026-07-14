@@ -6,6 +6,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Sokoban3D.Core;
 using Sokoban3D.ECS.Components;
 using Sokoban3D.Grid;
+using Sokoban3D.Levels;
 
 namespace Sokoban3D.Editor;
 
@@ -130,9 +131,11 @@ public class EditorRenderer
         const string header = "NIVEIS";
         const string hint = "W/S: navegar   clique/Enter: ir   Shift+W/S: mover   M/L/Esc: fechar";
 
+        int badgeSize = Math.Max(8, (int)lh - 6);
+        float reserve = _font.MeasureString("   ").X + 4 * (badgeSize + 4) + _font.MeasureString("  *").X;
         float width = Math.Max(_font.MeasureString(header).X, _font.MeasureString(hint).X);
-        foreach (var (id, name) in list)
-            width = Math.Max(width, _font.MeasureString($"#{id:D2}  {name}   (atual)").X);
+        foreach (var (id, name, _) in list)
+            width = Math.Max(width, _font.MeasureString($"#{id:D2}  {name}").X + reserve);
 
         int rows = Math.Max(1, list.Count) + 2; // header + dica + linhas
         var panel = new Rectangle(Pad, Pad, (int)width + Pad * 2, (int)(rows * lh) + Pad * 2);
@@ -147,13 +150,19 @@ public class EditorRenderer
         _levelHitboxes.Clear();
         for (int i = 0; i < list.Count; i++)
         {
-            var (id, name) = list[i];
+            var (id, name, badges) = list[i];
             var row = new Rectangle(panel.X, (int)y, panel.Width, (int)lh);
             bool selected = i == editor.ListSelection;
             if (selected)
                 Fill(row, Color.White * 0.14f);
-            string marker = id == editor.Working.Id ? "   (atual)" : "";
-            DrawShadowed($"#{id:D2}  {name}{marker}", new Vector2(x, y), selected ? Color.White : TextColor);
+
+            Color rowColor = selected ? Color.White : TextColor;
+            string baseText = id == editor.Working.Id ? $"#{id:D2}  {name}  *" : $"#{id:D2}  {name}";
+            DrawShadowed(baseText, new Vector2(x, y), rowColor);
+
+            // Quadradinhos de mecânica alinhados à direita do painel.
+            DrawBadges(panel.Right - Pad, y, badges, badgeSize);
+
             _levelHitboxes.Add(row);
             y += lh;
         }
@@ -161,6 +170,28 @@ public class EditorRenderer
             DrawShadowed("(nenhum nivel salvo)", new Vector2(x, y), HintColor);
 
         _spriteBatch.End();
+    }
+
+    /// <summary>
+    /// Desenha os quadradinhos das mecânicas presentes (swatch, igual à paleta de brushes)
+    /// alinhados à direita, terminando em <paramref name="rightEdge"/>. Sombra de 1px atrás.
+    /// </summary>
+    private void DrawBadges(float rightEdge, float y, LevelBadges badges, int size)
+    {
+        const int gap = 4;
+        int n = 0;
+        foreach (var _ in badges.Colors())
+            n++;
+        if (n == 0)
+            return;
+
+        float x = rightEdge - (n * size + (n - 1) * gap);
+        foreach (var color in badges.Colors())
+        {
+            Fill(new Rectangle((int)x + 1, (int)y + 4, size, size), Color.Black * 0.6f);
+            Fill(new Rectangle((int)x, (int)y + 3, size, size), color);
+            x += size + gap;
+        }
     }
 
     /// <summary>

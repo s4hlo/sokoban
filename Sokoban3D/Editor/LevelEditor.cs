@@ -89,7 +89,7 @@ public class LevelEditor
 
     // Lista de níveis pra reordenar (snapshot id+nome do repositório, montado ao abrir e a cada
     // troca). Modal como o rename: enquanto aberta, o teclado navega/reordena a lista.
-    private readonly List<(int Id, string Name)> _levelList = new();
+    private readonly List<(int Id, string Name, LevelBadges Badges)> _levelList = new();
     private int _listSelection;
     // Pedido de pular pra edição de outro nível (Enter na lista), consumido pelo Game1 após a
     // Update. Não trocamos a sessão aqui dentro: quem faz é o navigator, senão o nível pulado
@@ -142,8 +142,8 @@ public class LevelEditor
     public bool ShowLevelList { get; private set; }
     /// <summary>True em qualquer modo modal (rename ou lista): o Game1 segura Tab/Esc.</summary>
     public bool IsModal => _renaming || ShowLevelList;
-    /// <summary>Níveis (id+nome) da lista de reordenação, na ordem dos ids.</summary>
-    public IReadOnlyList<(int Id, string Name)> LevelList => _levelList;
+    /// <summary>Níveis (id+nome+badges) da lista de reordenação, na ordem dos ids.</summary>
+    public IReadOnlyList<(int Id, string Name, LevelBadges Badges)> LevelList => _levelList;
     /// <summary>Índice do nível selecionado na lista de reordenação.</summary>
     public int ListSelection => _listSelection;
 
@@ -387,17 +387,26 @@ public class LevelEditor
     {
         _levelList.Clear();
         foreach (var id in _repo.ListIds().OrderBy(i => i))
-            _levelList.Add((id, NameOf(id)));
+        {
+            var (name, badges) = Describe(id);
+            _levelList.Add((id, name, badges));
+        }
         _listSelection = Math.Clamp(_listSelection, 0, Math.Max(0, _levelList.Count - 1));
     }
 
-    /// <summary>Nome de um nível: o do working (edições não salvas) se for ele, senão lê do disco.</summary>
-    private string NameOf(int id)
+    /// <summary>
+    /// Nome + badges de um nível: os do working (edições não salvas) se for ele, senão lê do disco.
+    /// </summary>
+    private (string Name, LevelBadges Badges) Describe(int id)
     {
         if (_working != null && _working.Id == id)
-            return _working.Name;
-        try { return _repo.Load(id).Name; }
-        catch { return "?"; }
+            return (_working.Name, LevelBadges.From(_working));
+        try
+        {
+            var level = _repo.Load(id);
+            return (level.Name, LevelBadges.From(level));
+        }
+        catch { return ("?", default); }
     }
 
     private void HandleLevelList(KeyboardState k, MouseState mouse, int? hoverRow)

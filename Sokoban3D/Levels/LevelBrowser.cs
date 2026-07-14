@@ -14,13 +14,13 @@ namespace Sokoban3D.Levels;
 /// </summary>
 public sealed class LevelBrowser
 {
-    private readonly List<(int Id, string Name)> _items = new();
+    private readonly List<(int Id, string Name, LevelBadges Badges)> _items = new();
 
     /// <summary>True enquanto a lista está aberta (modal): o input de jogo fica suspenso.</summary>
     public bool Visible { get; private set; }
 
-    /// <summary>Níveis (id+nome) na ordem dos ids — a mesma ordem que os atalhos , . percorrem.</summary>
-    public IReadOnlyList<(int Id, string Name)> Items => _items;
+    /// <summary>Níveis (id+nome+badges) na ordem dos ids — a mesma ordem que os atalhos , . percorrem.</summary>
+    public IReadOnlyList<(int Id, string Name, LevelBadges Badges)> Items => _items;
 
     /// <summary>Índice da linha selecionada (0-based, sempre dentro dos limites da lista).</summary>
     public int Selection { get; private set; }
@@ -33,7 +33,10 @@ public sealed class LevelBrowser
     {
         _items.Clear();
         foreach (var id in repo.ListIds().OrderBy(i => i))
-            _items.Add((id, NameOf(repo, id)));
+        {
+            var (name, badges) = Describe(repo, id);
+            _items.Add((id, name, badges));
+        }
 
         int at = _items.FindIndex(it => it.Id == currentId);
         Selection = at >= 0 ? at : 0;
@@ -57,10 +60,14 @@ public sealed class LevelBrowser
     /// <summary>Id do nível selecionado, ou null se a lista está vazia.</summary>
     public int? SelectedId => _items.Count == 0 ? null : _items[Selection].Id;
 
-    /// <summary>Nome de um nível lido do disco (o "?" cobre um arquivo ilegível, como no editor).</summary>
-    private static string NameOf(LevelRepository repo, int id)
+    /// <summary>Nome + badges de um nível lido do disco (o "?" cobre um arquivo ilegível).</summary>
+    private static (string Name, LevelBadges Badges) Describe(LevelRepository repo, int id)
     {
-        try { return repo.Load(id).Name; }
-        catch { return "?"; }
+        try
+        {
+            var level = repo.Load(id);
+            return (level.Name, LevelBadges.From(level));
+        }
+        catch { return ("?", default); }
     }
 }
