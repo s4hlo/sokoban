@@ -16,8 +16,8 @@ namespace Sokoban3D.Solver;
 public class SolverTool
 {
     // Cadência do playback: uma ação a cada tanto — folga pra animação de deslize (~18 de
-    // smoothing) praticamente assentar entre passos.
-    private const float StepInterval = 0.25f;
+    // smoothing) assentar entre passos e dar pra acompanhar a solução a olho.
+    private const float StepInterval = 0.5f;
 
     private readonly LevelManager _levels;
     private readonly MovementSystem _movement;

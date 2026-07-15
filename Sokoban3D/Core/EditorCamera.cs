@@ -16,7 +16,7 @@ public class EditorCamera
 
     // Estado orbital em torno do alvo: ângulos em radianos e um multiplicador de raio (zoom).
     private float _yaw;
-    private float _pitch = DefaultPitch;
+    private float _pitch = CameraFraming.DefaultPitch;
     private float _zoom = 1f;
 
     // Enquadramento base recalculado por grid (raio isométrico e proporção da viewport).
@@ -24,8 +24,6 @@ public class EditorCamera
     private float _aspect = 1f;
     private Vector3 _target = Vector3.Zero;
 
-    // Elevação isométrica de origem: a mesma direção (0, 14, 12) da câmera do jogo.
-    private static readonly float DefaultPitch = MathF.Atan2(14f, 12f);
     private const float MinPitch = 0.20f; // ~11°: não deita até rasar o horizonte
     private const float MaxPitch = 1.45f; // ~83°: não passa direto por cima (trava o gimbal)
     private const float MinZoom = 0.35f;
@@ -40,15 +38,13 @@ public class EditorCamera
     /// </summary>
     public void Frame(int gridWidth, int gridDepth, float aspect)
     {
-        // Mesmo cálculo de distância da Camera do jogo (8 = tamanho de referência, 0.7 = zoom base).
-        float span = Math.Max(gridWidth, gridDepth);
-        float distance = Math.Max(1f, span / 8f) * 0.7f;
-        _baseRadius = MathF.Sqrt(14f * 14f + 12f * 12f) * distance;
+        // Mesmo enquadramento da Camera do jogo (raio isométrico por grid), via CameraFraming.
+        _baseRadius = CameraFraming.Radius(gridWidth, gridDepth);
         _aspect = aspect;
         _target = Vector3.Zero;
 
         _yaw = 0f;
-        _pitch = DefaultPitch;
+        _pitch = CameraFraming.DefaultPitch;
         _zoom = 1f;
         Rebuild();
     }
@@ -78,6 +74,7 @@ public class EditorCamera
             MathF.Cos(_pitch) * MathF.Cos(_yaw)) * r;
 
         View = Matrix.CreateLookAt(_target + offset, _target, Vector3.Up);
-        Projection = Matrix.CreatePerspectiveFieldOfView(MathHelper.PiOver4, _aspect, 0.1f, 200f);
+        Projection = Matrix.CreatePerspectiveFieldOfView(
+            CameraFraming.FieldOfView, _aspect, CameraFraming.NearPlane, CameraFraming.FarPlane);
     }
 }
