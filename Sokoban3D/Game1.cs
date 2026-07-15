@@ -73,9 +73,17 @@ public class Game1 : Game
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
 
+        // Console pra dev (roda por terminal) + arquivo pra pós-crash: os logs vão pra
+        // logs/sokoban-AAAAMMDD.log, um arquivo por dia, os últimos 7 dias mantidos. Assim
+        // qualquer erro (inclusive o crash fatal capturado no Program.cs) fica em disco mesmo
+        // sem terminal aberto.
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .WriteTo.Console()
+            .WriteTo.File(
+                System.IO.Path.Combine(System.AppContext.BaseDirectory, "logs", "sokoban-.log"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 7)
             .CreateLogger();
     }
 
