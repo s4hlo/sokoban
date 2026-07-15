@@ -17,10 +17,17 @@ public static class CameraFraming
     public const float Height = 20f;
     public const float Depth = 12f;
 
-    // Distância proporcional ao maior lado do grid (ReferenceSpan = tamanho de referência) vezes
-    // um zoom base (< 1 = mais perto). Enquadra qualquer nível sem mudar o ângulo.
-    private const float ReferenceSpan = 8f;
-    private const float BaseZoom = 0.5f;
+    // Distância proporcional ao lado dominante do grid (ver EffectiveSpan) vezes um zoom base
+    // (< 1 = mais perto). Enquadra qualquer nível sem mudar o ângulo.
+    private const float ReferenceSpan = 6f;
+    private const float BaseZoom = 0.45f;
+
+    // Peso da largura vs profundidade no enquadramento. Numa tela 16:9 o FOV horizontal (~73°) é
+    // bem maior que o vertical (45°), então a largura (X, eixo horizontal) "cabe" mais fácil que a
+    // profundidade (Z, eixo vertical). Contamos a largura com peso < 1 pra um nível fundo afastar
+    // mais que um igualmente largo. ~0.56 ≈ tan(FOV_v/2)/tan(FOV_h/2) no 16:9 (assume essa razão;
+    // se um dia rodar em outro aspect, derivar daqui em vez do valor fixo).
+    private const float WidthWeight = 0.56f;
 
     // Perspectiva compartilhada.
     public const float FieldOfView = MathHelper.PiOver4;
@@ -33,7 +40,8 @@ public static class CameraFraming
     /// <summary>Fator de afastamento pro grid dado — mesma regra pras duas câmeras.</summary>
     public static float Distance(int gridWidth, int gridDepth)
     {
-        float span = Math.Max(gridWidth, gridDepth);
+        // Largura descontada pelo WidthWeight (16:9 dá folga horizontal): nível fundo afasta mais.
+        float span = Math.Max(gridWidth * WidthWeight, gridDepth);
         return Math.Max(1f, span / ReferenceSpan) * BaseZoom;
     }
 
