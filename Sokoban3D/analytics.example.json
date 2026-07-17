@@ -1,0 +1,5 @@
+{
+  "_comment": "Copie este arquivo pra 'analytics.json' (ao lado do executavel, ou na raiz do Sokoban3D) e preencha com as chaves do painel do GameAnalytics (Game > Settings). O analytics.json real e' ignorado pelo git. Alternativa: exportar as variaveis de ambiente GAMEANALYTICS_GAME_KEY e GAMEANALYTICS_SECRET_KEY. Sem nenhum dos dois, o jogo roda com a telemetria desligada.",
+  "gameKey": "SEU_GAME_KEY_AQUI",
+  "secretKey": "SEU_SECRET_KEY_AQUI"
+}

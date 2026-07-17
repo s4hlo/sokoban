@@ -23,7 +23,12 @@
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
+    <!-- Chaves de telemetria (git-ignored): se existir, vai pro diretório de saída pro SDK achar. -->
+    <None Include="analytics.json" Condition="Exists('analytics.json')" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Arch" Version="2.1.0" />
+    <PackageReference Include="GameAnalytics.Net.Core.SDK" Version="3.4.0" />
     <PackageReference Include="MonoGame.Extended" Version="6.0.0" />
     <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
     <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.*" />

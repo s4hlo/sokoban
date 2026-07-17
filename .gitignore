@@ -75,6 +75,13 @@ $RECYCLE.BIN/
 publish/
 *.zip
 
+# ---- Telemetria (GameAnalytics) ----
+# Chaves reais (a secret NÃO pode ir pro git) — use o analytics.example.json como molde.
+analytics.json
+# Fila offline local do SDK (sqlite).
+ga_local_events.db
+*.gadb
+
 # ---- Misc ----
 *.log
 *.tmp

@@ -3,6 +3,7 @@ using Arch.Core;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using Sokoban3D.Analytics;
 using Sokoban3D.Core;
 using Sokoban3D.ECS.Components;
 using Sokoban3D.ECS.Systems;
@@ -60,6 +61,10 @@ public class Game1 : Game
     // salva Solutions/level_N.moves pro oráculo de solvabilidade (se ainda não existir).
     private SolutionRecorder _recorder;
 
+    // Telemetria por nível (tempo, movimentos, drop, conclusão): alimenta o GameAnalytics pra
+    // decidir a ordem dos níveis. Sem chaves configuradas vira no-op — não afeta o jogo.
+    private LevelAnalytics _analytics;
+
     // Sessão ativa: o navigator é dono da pilha/cache de níveis; aqui só se referencia o topo.
     private GameWorld Active => _navigator.Active;
 
@@ -101,6 +106,12 @@ public class Game1 : Game
         // ativo (retomar um suspenso continua o log dele); resetar de verdade é outra ação (R/F).
         _recorder = new SolutionRecorder();
         _navigator.LevelChanged += () => _recorder.Track(Active.LevelId);
+
+        // Telemetria: usa o GameAnalytics se houver chaves, senão um coletor nulo. O tracker
+        // acompanha a sessão ativa (mesmo hook do gravador) pra pausar/retomar o cronômetro do
+        // nível conforme se entra/sai de portais.
+        _analytics = new LevelAnalytics(GameAnalyticsSink.TryCreate() ?? new NullAnalytics());
+        _navigator.LevelChanged += () => _analytics.OnActiveLevel(Active.LevelId, Active.CurrentLevel?.Name);
 
         _editor = new LevelEditor(_levelManager, _levelRepo);
         // Redimensionar o grid no editor exige reenquadrar a câmera.
@@ -275,11 +286,13 @@ public class Game1 : Game
             _levelManager.FullReset(Active);
             _animationSystem.SnapAll(Active);
             _recorder.Reset(Active.LevelId);
+            _analytics.OnFullReset();
         }
         else if (Pressed(keyboard, Keys.R))
         {
             _levelManager.Restart(Active);
             _recorder.Reset(Active.LevelId);
+            _analytics.OnRestart();
         }
         else if (Pressed(keyboard, Keys.Z))
         {
@@ -291,6 +304,7 @@ public class Game1 : Game
             {
                 _movementSystem.AnimateUndoTeleports(Active, Active.History.LastReverted);
                 _recorder.RecordUndo();
+                _analytics.OnUndo();
             }
         }
         // T = suspender: sai pro pai preservando este nível (volta exatamente onde parou).
@@ -304,6 +318,7 @@ public class Game1 : Game
 
         var stepped = _movementSystem.Update(Active, keyboard);
         _recorder.RecordStep(stepped.Dx, stepped.Dz);
+        _analytics.OnStep(stepped.Dx, stepped.Dz);
 
         // Mover cancela o "P armado" (como uma edição cancela o confirm do editor).
         if (stepped.Dx != 0 || stepped.Dz != 0)
@@ -321,6 +336,8 @@ public class Game1 : Game
         if (PlayerOnObjective(Active))
         {
             _recorder.SaveOnWin(Active);
+            // Antes do CompleteActive: a sessão ativa ainda é o nível vencido (o Complete a descarta).
+            _analytics.OnWin(Active.LevelId, Active.CurrentLevel?.Name);
             _navigator.CompleteActive();
         }
         else if (Pressed(keyboard, Keys.Enter))
@@ -553,6 +570,8 @@ public class Game1 : Game
     {
         if (disposing)
         {
+            // Fecha as tentativas em aberto (drop) e descarrega a fila do GA antes de sair.
+            _analytics?.OnQuit();
             _navigator.Dispose();
             Log.CloseAndFlush();
         }
